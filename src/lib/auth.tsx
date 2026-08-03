@@ -30,20 +30,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   const load = async (uid: string) => {
-    const [{ data: p }, { data: r }, { data: b }] = await Promise.all([
-      supabase.from("profiles").select("*").eq("id", uid).maybeSingle(),
-      supabase.from("user_roles").select("role").eq("user_id", uid).maybeSingle(),
-      supabase.from("branches").select("*").order("created_at"),
-    ]);
-    setProfile((p as Profile) ?? null);
-    const rr = (r?.role as "admin" | "cashier") ?? "cashier";
-    setRole(rr);
-    setBranches((b as Branch[]) ?? []);
-    setActiveBranch(rr === "admin" ? "all" : ((p as Profile)?.branch_id ?? "all"));
+    try {
+      const [{ data: p }, { data: r }, { data: b }] = await Promise.all([
+        supabase.from("profiles").select("*").eq("id", uid).maybeSingle(),
+        supabase.from("user_roles").select("role").eq("user_id", uid).maybeSingle(),
+        supabase.from("branches").select("*").order("created_at"),
+      ]);
+      setProfile((p as Profile) ?? null);
+      const rr = (r?.role as "admin" | "cashier") ?? "cashier";
+      setRole(rr);
+      setBranches((b as Branch[]) ?? []);
+      setActiveBranch(rr === "admin" ? "all" : ((p as Profile)?.branch_id ?? "all"));
+    } catch (err) {
+      console.error("Failed to load user profile/branches:", err);
+    }
   };
 
   useEffect(() => {
+    let mounted = true;
+
     const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => {
+      if (!mounted) return;
       setSession(s);
       if (s?.user) {
         setTimeout(() => void load(s.user.id), 0);
@@ -52,12 +59,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setRole(null);
       }
     });
-    supabase.auth.getSession().then(async ({ data }) => {
-      setSession(data.session);
-      if (data.session?.user) await load(data.session.user.id);
-      setLoading(false);
-    });
-    return () => sub.subscription.unsubscribe();
+
+    async function initAuth() {
+      try {
+        const { data, error } = await supabase.auth.getSession();
+        if (error) console.error("Supabase getSession error:", error);
+        if (mounted) {
+          setSession(data?.session ?? null);
+          if (data?.session?.user) {
+            await load(data.session.user.id);
+          }
+        }
+      } catch (err) {
+        console.error("Auth init exception:", err);
+      } finally {
+        if (mounted) {
+          setLoading(false);
+        }
+      }
+    }
+
+    void initAuth();
+
+    return () => {
+      mounted = false;
+      sub.subscription.unsubscribe();
+    };
   }, []);
 
   const value: AuthState = {
