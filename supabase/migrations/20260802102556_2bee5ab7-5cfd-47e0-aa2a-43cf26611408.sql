@@ -1,0 +1,2 @@
+UPDATE public.branches SET name = 'Talwandi', city = 'Talwandi' WHERE id = '11111111-1111-1111-1111-111111111111';
+UPDATE public.branches SET name = 'Kasur', city = 'Kasur' WHERE id = '22222222-2222-2222-2222-222222222222';
