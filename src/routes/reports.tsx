@@ -3,7 +3,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { FileSpreadsheet } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { useAuth } from "@/lib/auth";
-import { useMovements, useProducts, useReturns, useSaleItems, useSales } from "@/lib/queries";
+import { useMovements, useProducts, useProductBatches, useReturns, useSaleItems, useSales } from "@/lib/queries";
 import { exportRows, stockStatus, daysToExpiry } from "@/lib/pos";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -31,6 +31,7 @@ function ReportsPage() {
   const { data: products = [] } = useProducts(activeBranch);
   const { data: movements = [] } = useMovements(activeBranch);
   const { data: returns = [] } = useReturns(activeBranch);
+  const { data: batches = [] } = useProductBatches(activeBranch);
 
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
@@ -106,24 +107,54 @@ function ReportsPage() {
         ),
     },
     {
-      title: "Stock Report",
-      desc: "Full inventory with available quantity, cost and retail value.",
+      title: "Stock Report (Complete Audit)",
+      desc: "Comprehensive inventory audit with total purchased, sold, returned, batch # and expiry.",
       run: () =>
         exportRows(
-          products.filter((p) => matchProd(p)).map((p) => ({
-            "Product Name": p.name,
-            "Generic Name": p.generic_name,
-            Company: p.company,
-            Category: p.category,
-            Branch: branchName(p.branch_id),
-            Stock: p.stock_quantity,
-            Unit: p.unit,
-            "Purchase Price": p.purchase_price,
-            "Selling Price": p.selling_price,
-            "Stock Value": Number(p.purchase_price) * Number(p.stock_quantity),
-            Status: stockStatus(p),
-          })),
-          "stock-report",
+          products
+            .filter((p) => matchProd(p))
+            .map((p) => {
+              const prodMovements = movements.filter((m) => m.product_id === p.id);
+              const prodSales = items.filter((i) => i.product_id === p.id);
+              const prodReturns = returns.filter((r) => r.product_id === p.id);
+              const prodBatches = batches.filter((b) => b.product_id === p.id && b.stock_quantity > 0);
+
+              const totalPurchased = prodMovements
+                .filter((m) => m.movement_type === "purchase" || m.movement_type === "adjustment_in")
+                .reduce((sum, m) => sum + Number(m.quantity), 0);
+              const totalSold = prodSales.reduce((sum, s) => sum + Number(s.quantity), 0);
+              const totalReturned = prodReturns.reduce((sum, r) => sum + Number(r.quantity), 0);
+
+              const activeBatchNums = prodBatches.map((b) => b.batch_number).filter(Boolean).join(", ") || p.batch_number || "Standard";
+              const earliestExp = prodBatches[0]?.expiry_date || p.expiry_date || "No Expiry";
+
+              const costValue = Number(p.purchase_price) * Number(p.stock_quantity);
+              const retailValue = Number(p.selling_price) * Number(p.stock_quantity);
+              const grossProfit = (Number(p.selling_price) - Number(p.purchase_price)) * Number(p.stock_quantity);
+
+              return {
+                "Product Name": p.name,
+                "Generic Name": p.generic_name || "—",
+                Company: p.company || "—",
+                Category: p.category || "—",
+                Brand: p.brand || "—",
+                Unit: p.unit,
+                "Current Available Stock": Number(p.stock_quantity),
+                "Total Purchased Qty": totalPurchased,
+                "Total Sold Qty": totalSold,
+                "Total Returned Qty": totalReturned,
+                "Active Batch Numbers": activeBatchNums,
+                "Expiry Date": earliestExp,
+                "Purchase Price (Rs)": Number(p.purchase_price),
+                "Selling Price (Rs)": Number(p.selling_price),
+                "Stock Value Cost (Rs)": costValue,
+                "Stock Value Retail (Rs)": retailValue,
+                "Potential Gross Profit (Rs)": grossProfit,
+                "Stock Status": stockStatus(p),
+                Branch: branchName(p.branch_id),
+              };
+            }),
+          "stock-report-complete-audit",
           format,
         ),
     },

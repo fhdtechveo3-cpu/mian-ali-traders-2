@@ -5,7 +5,7 @@ import { Copy, Pencil, Plus, Search, Trash2, Upload, Download, History } from "l
 import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
 import { useAuth } from "@/lib/auth";
-import { useMovements, useProducts, useReturns, useSaleItems, useSuppliers } from "@/lib/queries";
+import { useMovements, useProducts, useProductBatches, useReturns, useSaleItems, useSuppliers } from "@/lib/queries";
 import { PKR, NUM, exportRows, readSheet, stockStatus, type Product } from "@/lib/pos";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent } from "@/components/ui/card";
@@ -56,6 +56,7 @@ function ProductsPage() {
   const { data: movements = [] } = useMovements(activeBranch);
   const { data: saleItems = [] } = useSaleItems();
   const { data: returns = [] } = useReturns(activeBranch);
+  const { data: batches = [] } = useProductBatches(activeBranch);
 
   const [term, setTerm] = useState("");
   const [category, setCategory] = useState("all");
@@ -207,21 +208,48 @@ function ProductsPage() {
             size="sm"
             onClick={() =>
               exportRows(
-                filtered.map((p) => ({
-                  "Product Name": p.name,
-                  "Generic Name": p.generic_name,
-                  Brand: p.brand,
-                  Company: p.company,
-                  Category: p.category,
-                  "Purchase Price": p.purchase_price,
-                  "Selling Price": p.selling_price,
-                  Stock: p.stock_quantity,
-                  Unit: p.unit,
-                  Batch: p.batch_number,
-                  Expiry: p.expiry_date,
-                  Branch: branches.find((b) => b.id === p.branch_id)?.name,
-                })),
-                "products",
+                filtered.map((p) => {
+                  const prodMovements = movements.filter((m) => m.product_id === p.id);
+                  const prodSales = saleItems.filter((i) => i.product_id === p.id);
+                  const prodReturns = returns.filter((r) => r.product_id === p.id);
+                  const prodBatches = batches.filter((b) => b.product_id === p.id && b.stock_quantity > 0);
+
+                  const totalPurchased = prodMovements
+                    .filter((m) => m.movement_type === "purchase" || m.movement_type === "adjustment_in")
+                    .reduce((sum, m) => sum + Number(m.quantity), 0);
+                  const totalSold = prodSales.reduce((sum, s) => sum + Number(s.quantity), 0);
+                  const totalReturned = prodReturns.reduce((sum, r) => sum + Number(r.quantity), 0);
+
+                  const activeBatchNums = prodBatches.map((b) => b.batch_number).filter(Boolean).join(", ") || p.batch_number || "Standard";
+                  const earliestExp = prodBatches[0]?.expiry_date || p.expiry_date || "No Expiry";
+
+                  const costValue = Number(p.purchase_price) * Number(p.stock_quantity);
+                  const retailValue = Number(p.selling_price) * Number(p.stock_quantity);
+                  const grossProfit = (Number(p.selling_price) - Number(p.purchase_price)) * Number(p.stock_quantity);
+
+                  return {
+                    "Product Name": p.name,
+                    "Generic Name": p.generic_name || "—",
+                    Company: p.company || "—",
+                    Category: p.category || "—",
+                    Brand: p.brand || "—",
+                    Unit: p.unit,
+                    "Current Available Stock": Number(p.stock_quantity),
+                    "Total Purchased Qty": totalPurchased,
+                    "Total Sold Qty": totalSold,
+                    "Total Returned Qty": totalReturned,
+                    "Active Batch Numbers": activeBatchNums,
+                    "Expiry Date": earliestExp,
+                    "Purchase Price (Rs)": Number(p.purchase_price),
+                    "Selling Price (Rs)": Number(p.selling_price),
+                    "Stock Value Cost (Rs)": costValue,
+                    "Stock Value Retail (Rs)": retailValue,
+                    "Potential Gross Profit (Rs)": grossProfit,
+                    "Stock Status": stockStatus(p),
+                    Branch: branches.find((b) => b.id === p.branch_id)?.name || "—",
+                  };
+                }),
+                "products_complete_audit",
               )
             }
           >
