@@ -51,13 +51,23 @@ function ReturnsPage() {
   const filteredSales = useMemo(() => {
     const q = searchInvoice.trim().toLowerCase();
     if (!q) return [];
+
+    const matchingSaleIds = new Set(
+      saleItems
+        .filter((i) => i.product_name.toLowerCase().includes(q))
+        .map((i) => (i as unknown as { sale_id?: string }).sale_id)
+        .filter(Boolean)
+    );
+
     return sales.filter((s) => {
       const phone = (s as unknown as { customer_phone?: string }).customer_phone ?? "";
-      return s.invoice_number.toLowerCase().includes(q) ||
-        (s.customer_name && s.customer_name.toLowerCase().includes(q)) ||
-        phone.toLowerCase().includes(q);
+      const matchInv = s.invoice_number.toLowerCase().includes(q);
+      const matchCust = Boolean(s.customer_name && s.customer_name.toLowerCase().includes(q));
+      const matchPhone = phone.toLowerCase().includes(q);
+      const matchProduct = matchingSaleIds.has(s.id);
+      return matchInv || matchCust || matchPhone || matchProduct;
     });
-  }, [sales, searchInvoice]);
+  }, [sales, saleItems, searchInvoice]);
 
   const itemsForSelectedSale = useMemo(() => {
     if (!selectedSale) return [];
@@ -189,7 +199,7 @@ function ReturnsPage() {
                 <div className="relative">
                   <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
                   <Input
-                    placeholder="Enter Invoice #, Customer Name, or Phone Number"
+                    placeholder="Enter Invoice #, Customer Name, Phone, or Sold Product Name..."
                     className="pl-9"
                     value={searchInvoice}
                     onChange={(e) => setSearchInvoice(e.target.value)}
@@ -198,9 +208,14 @@ function ReturnsPage() {
               </div>
 
               {searchInvoice.trim() && (
-                <div className="max-h-48 space-y-1 overflow-y-auto rounded-md border p-2 text-sm">
+                <div className="max-h-56 space-y-1 overflow-y-auto rounded-md border p-2 text-sm">
                   {filteredSales.map((s) => {
                     const phone = (s as unknown as { customer_phone?: string }).customer_phone;
+                    const qTerm = searchInvoice.trim().toLowerCase();
+                    const matchedItem = saleItems.find(
+                      (i) => (i as unknown as { sale_id?: string }).sale_id === s.id && i.product_name.toLowerCase().includes(qTerm)
+                    );
+
                     return (
                       <button
                         key={s.id}
@@ -214,14 +229,22 @@ function ReturnsPage() {
                         }`}
                       >
                         <div>
-                          <p className="font-semibold">{s.invoice_number}</p>
+                          <p className="font-semibold text-xs flex items-center gap-1.5">
+                            <span>{s.invoice_number}</span>
+                            <span className="text-[11px] text-muted-foreground">({new Date(s.created_at).toLocaleDateString()})</span>
+                          </p>
                           <p className="text-xs text-muted-foreground">{s.customer_name || "Walk-in"}{phone ? ` · ${phone}` : ""}</p>
+                          {matchedItem && (
+                            <p className="text-xs text-emerald-600 font-medium pt-0.5">
+                              Matched Item: {matchedItem.product_name} (Qty: {matchedItem.quantity})
+                            </p>
+                          )}
                         </div>
                         <Badge variant="outline">{PKR(s.total)}</Badge>
                       </button>
                     );
                   })}
-                  {!filteredSales.length && <p className="p-2 text-center text-xs text-muted-foreground">No matching invoices found.</p>}
+                  {!filteredSales.length && <p className="p-2 text-center text-xs text-muted-foreground">No matching sold items or invoices found.</p>}
                 </div>
               )}
 
