@@ -1,11 +1,11 @@
 import { useMemo, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
-import { Copy, Pencil, Plus, Search, Trash2, Upload, Download } from "lucide-react";
+import { Copy, Pencil, Plus, Search, Trash2, Upload, Download, History } from "lucide-react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
 import { useAuth } from "@/lib/auth";
-import { useProducts, useSuppliers } from "@/lib/queries";
+import { useMovements, useProducts, useReturns, useSaleItems, useSuppliers } from "@/lib/queries";
 import { PKR, NUM, exportRows, readSheet, stockStatus, type Product } from "@/lib/pos";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent } from "@/components/ui/card";
@@ -53,6 +53,9 @@ function ProductsPage() {
   const qc = useQueryClient();
   const { data: products = [], isLoading } = useProducts(activeBranch);
   const { data: suppliers = [] } = useSuppliers();
+  const { data: movements = [] } = useMovements(activeBranch);
+  const { data: saleItems = [] } = useSaleItems();
+  const { data: returns = [] } = useReturns(activeBranch);
 
   const [term, setTerm] = useState("");
   const [category, setCategory] = useState("all");
@@ -60,6 +63,7 @@ function ProductsPage() {
   const [open, setOpen] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [form, setForm] = useState({ ...blank });
+  const [historyProduct, setHistoryProduct] = useState<Product | null>(null);
 
   const categories = Array.from(new Set(products.map((p) => p.category).filter(Boolean))) as string[];
 
@@ -290,6 +294,9 @@ function ProductsPage() {
                       <TableCell className="text-sm">{p.expiry_date ?? "—"}</TableCell>
                       <TableCell className="text-xs">{branches.find((b) => b.id === p.branch_id)?.city ?? "—"}</TableCell>
                       <TableCell className="text-right">
+                        <Button size="icon" variant="ghost" className="h-8 w-8" title="Product Stock Ledger" onClick={() => setHistoryProduct(p)}>
+                          <History className="h-3.5 w-3.5 text-primary" />
+                        </Button>
                         <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => openEdit(p)}><Pencil className="h-3.5 w-3.5" /></Button>
                         <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => openEdit(p, true)}><Copy className="h-3.5 w-3.5" /></Button>
                         {isAdmin && (
@@ -351,6 +358,91 @@ function ProductsPage() {
             <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
             <Button onClick={() => void save()}>{editId ? "Save changes" : "Add product"}</Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Single Product History Ledger Modal */}
+      <Dialog open={!!historyProduct} onOpenChange={(v) => !v && setHistoryProduct(null)}>
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <History className="h-5 w-5 text-primary" /> Product Stock History — {historyProduct?.name}
+            </DialogTitle>
+          </DialogHeader>
+
+          {historyProduct && (() => {
+            const pId = historyProduct.id;
+            const prodMovements = movements.filter((m) => m.product_id === pId);
+            const prodSales = saleItems.filter((i) => i.product_id === pId);
+            const prodReturns = returns.filter((r) => r.product_id === pId);
+
+            const totalPurchased = prodMovements
+              .filter((m) => m.movement_type === "purchase" || m.movement_type === "adjustment_in")
+              .reduce((sum, m) => sum + Number(m.quantity), 0);
+            const totalSold = prodSales.reduce((sum, s) => sum + Number(s.quantity), 0);
+            const totalReturned = prodReturns.reduce((sum, r) => sum + Number(r.quantity), 0);
+
+            const timeline: Array<{ id: string; date: string; type: string; qty: number; price: number; ref: string }> = [];
+            prodMovements.forEach((m) => {
+              timeline.push({ id: `mov-${m.id}`, date: m.created_at, type: m.movement_type, qty: Number(m.quantity), price: Number(m.purchase_price) || 0, ref: m.reference || m.note || "Stock Movement" });
+            });
+            prodSales.forEach((s) => {
+              timeline.push({ id: `sale-${s.id}`, date: s.created_at, type: "sale", qty: -Number(s.quantity), price: Number(s.price), ref: "Counter Sale" });
+            });
+            prodReturns.forEach((r) => {
+              timeline.push({ id: `ret-${r.id}`, date: r.created_at, type: "return", qty: Number(r.quantity), price: Number(r.unit_price), ref: `Return: ${r.invoice_number}` });
+            });
+            timeline.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+            return (
+              <div className="space-y-4 pt-2">
+                <div className="grid grid-cols-2 gap-3 text-xs sm:grid-cols-4">
+                  <div className="rounded-md border bg-card p-3">
+                    <p className="text-muted-foreground">Stock Received</p>
+                    <p className="text-lg font-bold text-emerald-600">+{NUM(totalPurchased)}</p>
+                  </div>
+                  <div className="rounded-md border bg-card p-3">
+                    <p className="text-muted-foreground">Total Sold</p>
+                    <p className="text-lg font-bold text-blue-600">-{NUM(totalSold)}</p>
+                  </div>
+                  <div className="rounded-md border bg-card p-3">
+                    <p className="text-muted-foreground">Total Returned</p>
+                    <p className="text-lg font-bold text-amber-600">+{NUM(totalReturned)}</p>
+                  </div>
+                  <div className="rounded-md border bg-card p-3">
+                    <p className="text-muted-foreground">Current Stock</p>
+                    <p className="text-lg font-bold text-foreground">{NUM(historyProduct.stock_quantity)} {historyProduct.unit}</p>
+                  </div>
+                </div>
+
+                <div className="rounded-md border overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Date & Time</TableHead>
+                        <TableHead>Event Type</TableHead>
+                        <TableHead className="text-right">Qty</TableHead>
+                        <TableHead className="text-right">Unit Rate</TableHead>
+                        <TableHead>Reference / Note</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {timeline.map((row) => (
+                        <TableRow key={row.id}>
+                          <TableCell className="text-xs text-muted-foreground">{new Date(row.date).toLocaleString()}</TableCell>
+                          <TableCell><Badge variant={row.type === "sale" ? "secondary" : row.type === "purchase" ? "default" : "outline"}>{row.type.replace("_", " ")}</Badge></TableCell>
+                          <TableCell className={`text-right font-medium ${row.qty > 0 ? "text-emerald-600" : "text-destructive"}`}>{row.qty > 0 ? `+${NUM(row.qty)}` : NUM(row.qty)}</TableCell>
+                          <TableCell className="text-right">{PKR(row.price)}</TableCell>
+                          <TableCell className="text-xs text-muted-foreground">{row.ref}</TableCell>
+                        </TableRow>
+                      ))}
+                      {!timeline.length && <TableRow><TableCell colSpan={5} className="py-6 text-center text-sm text-muted-foreground">No history events recorded for this product yet.</TableCell></TableRow>}
+                    </TableBody>
+                  </Table>
+                </div>
+              </div>
+            );
+          })()}
         </DialogContent>
       </Dialog>
     </AppShell>
