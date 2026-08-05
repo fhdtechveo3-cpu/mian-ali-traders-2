@@ -65,31 +65,51 @@ function SalesPage() {
     });
   }, [sales, term, from, to]);
 
+  const filteredReturns = useMemo(() => {
+    return returns.filter((r) => {
+      const d = new Date(r.created_at);
+      const okFrom = !from || d >= new Date(`${from}T00:00:00`);
+      const okTo = !to || d <= new Date(`${to}T23:59:59`);
+      return okFrom && okTo;
+    });
+  }, [returns, from, to]);
+
   const grossRevenue = filtered.reduce((a, s) => a + Number(s.total), 0);
-  const totalRefunds = returns.reduce((a, r) => a + Number(r.refund_amount), 0);
+  const totalRefunds = filteredReturns.reduce((a, r) => a + Number(r.refund_amount), 0);
   const netRevenue = grossRevenue - totalRefunds;
   const profit = filtered.reduce((a, s) => a + Number(s.profit), 0) - totalRefunds;
   const due = filtered.reduce((a, s) => a + Number(s.remaining_amount), 0);
 
   const todayNet = useMemo(() => {
-    const today = new Date().toDateString();
-    const todaySales = sales.filter((s) => new Date(s.created_at).toDateString() === today).reduce((sum, s) => sum + Number(s.total), 0);
-    const todayReturns = returns.filter((r) => new Date(r.created_at).toDateString() === today).reduce((sum, r) => sum + Number(r.refund_amount), 0);
+    const now = new Date();
+    const isToday = (dStr: string) => {
+      const d = new Date(dStr);
+      return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
+    };
+    const todaySales = sales.filter((s) => isToday(s.created_at)).reduce((sum, s) => sum + Number(s.total), 0);
+    const todayReturns = returns.filter((r) => isToday(r.created_at)).reduce((sum, r) => sum + Number(r.refund_amount), 0);
     return todaySales - todayReturns;
   }, [sales, returns]);
 
   const weekNet = useMemo(() => {
-    const now = new Date().getTime();
-    const weekSales = sales.filter((s) => (now - new Date(s.created_at).getTime()) <= 7 * 86400000).reduce((sum, s) => sum + Number(s.total), 0);
-    const weekReturns = returns.filter((r) => (now - new Date(r.created_at).getTime()) <= 7 * 86400000).reduce((sum, r) => sum + Number(r.refund_amount), 0);
+    const now = new Date();
+    const startOfWeek = new Date(now);
+    const day = now.getDay();
+    const diff = now.getDate() - day + (day === 0 ? -6 : 1);
+    startOfWeek.setDate(diff);
+    startOfWeek.setHours(0, 0, 0, 0);
+
+    const isThisWeek = (dStr: string) => new Date(dStr) >= startOfWeek;
+    const weekSales = sales.filter((s) => isThisWeek(s.created_at)).reduce((sum, s) => sum + Number(s.total), 0);
+    const weekReturns = returns.filter((r) => isThisWeek(r.created_at)).reduce((sum, r) => sum + Number(r.refund_amount), 0);
     return weekSales - weekReturns;
   }, [sales, returns]);
 
   const monthNet = useMemo(() => {
     const now = new Date();
-    const isThisMonth = (d: string) => {
-      const t = new Date(d);
-      return t.getMonth() === now.getMonth() && t.getFullYear() === now.getFullYear();
+    const isThisMonth = (dStr: string) => {
+      const d = new Date(dStr);
+      return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
     };
     const monthSales = sales.filter((s) => isThisMonth(s.created_at)).reduce((sum, s) => sum + Number(s.total), 0);
     const monthReturns = returns.filter((r) => isThisMonth(r.created_at)).reduce((sum, r) => sum + Number(r.refund_amount), 0);
@@ -169,13 +189,13 @@ function SalesPage() {
       }
     >
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
-        <StatCard title="Gross Sales" value={PKR(grossRevenue)} sub="Total original sales" />
-        <StatCard title="Total Refunds" value={PKR(totalRefunds)} tone="destructive" sub="Deducted returns" />
-        <StatCard title="Net Revenue" value={PKR(netRevenue)} tone="success" sub="After returns" />
-        {isAdmin && <StatCard title="Total Profit" value={PKR(profit)} tone="success" sub="Net profit" />}
-        <StatCard title="Today's Sales" value={PKR(todayNet)} tone="success" sub="Net sales today" />
-        <StatCard title="This Week" value={PKR(weekNet)} tone="success" sub="Net sales 7 days" />
-        <StatCard title="This Month" value={PKR(monthNet)} tone="success" sub="Net sales this month" />
+        <StatCard label="Gross Sales" value={PKR(grossRevenue)} hint="Total original sales" />
+        <StatCard label="Total Refunds" value={PKR(totalRefunds)} tone="destructive" hint="Deducted returns" />
+        <StatCard label="Net Revenue" value={PKR(netRevenue)} tone="success" hint="After returns" />
+        <StatCard label="Outstanding" value={PKR(due)} tone={due > 0 ? "warning" : "default"} hint="Customer due" />
+        <StatCard label="Today's Sales" value={PKR(todayNet)} tone="success" hint="Net sales today" />
+        <StatCard label="This Week" value={PKR(weekNet)} tone="success" hint="Net sales this week" />
+        <StatCard label="This Month" value={PKR(monthNet)} tone="success" hint="Net sales this month" />
       </div>
 
       <Card className="mt-5">

@@ -171,8 +171,8 @@ function ReturnsPage() {
     <AppShell title="Returns & Refunds" subtitle="Process product returns, restore stock levels and track cash refunds">
       <div className="space-y-6">
         <div className="grid gap-4 sm:grid-cols-2">
-          <StatCard title="Total Return Transactions" value={returns.length} sub="Returned items count" />
-          <StatCard title="Total Refunded Amount" value={PKR(totalRefundsValue)} tone="destructive" sub="Deducted cash refunds" />
+          <StatCard label="Total Return Transactions" value={returns.length} hint="Returned items count" />
+          <StatCard label="Total Refunded Amount" value={PKR(totalRefundsValue)} tone="destructive" hint="Deducted cash refunds" />
         </div>
 
         <div className="grid gap-6 lg:grid-cols-12">
