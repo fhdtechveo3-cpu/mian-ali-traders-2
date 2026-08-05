@@ -86,6 +86,7 @@ create table if not exists public.sales (
   branch_id uuid not null references public.branches(id) on delete cascade,
   customer_id uuid references public.customers(id) on delete set null,
   customer_name text,
+  customer_phone text,
   subtotal numeric(12,2) not null default 0,
   discount numeric(12,2) not null default 0,
   total numeric(12,2) not null default 0,

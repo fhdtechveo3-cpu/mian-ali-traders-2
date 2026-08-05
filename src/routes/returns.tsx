@@ -51,7 +51,12 @@ function ReturnsPage() {
   const filteredSales = useMemo(() => {
     const q = searchInvoice.trim().toLowerCase();
     if (!q) return [];
-    return sales.filter((s) => s.invoice_number.toLowerCase().includes(q) || (s.customer_name && s.customer_name.toLowerCase().includes(q)));
+    return sales.filter((s) => {
+      const phone = (s as unknown as { customer_phone?: string }).customer_phone ?? "";
+      return s.invoice_number.toLowerCase().includes(q) ||
+        (s.customer_name && s.customer_name.toLowerCase().includes(q)) ||
+        phone.toLowerCase().includes(q);
+    });
   }, [sales, searchInvoice]);
 
   const itemsForSelectedSale = useMemo(() => {
@@ -154,7 +159,7 @@ function ReturnsPage() {
                 <div className="relative">
                   <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
                   <Input
-                    placeholder="Enter Invoice # (e.g. INV-...) or Customer Name"
+                    placeholder="Enter Invoice #, Customer Name, or Phone Number"
                     className="pl-9"
                     value={searchInvoice}
                     onChange={(e) => setSearchInvoice(e.target.value)}

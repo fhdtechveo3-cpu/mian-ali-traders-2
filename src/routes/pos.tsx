@@ -37,6 +37,7 @@ type Receipt = {
   date: string;
   branch: string;
   customer: string;
+  phone?: string;
   lines: { name: string; quantity: number; price: number }[];
   subtotal: number;
   discount: number;
@@ -58,6 +59,8 @@ function PosPage() {
   const [term, setTerm] = useState("");
   const [lines, setLines] = useState<Line[]>([]);
   const [customerId, setCustomerId] = useState("walkin");
+  const [custName, setCustName] = useState("Walk-in Customer");
+  const [custPhone, setCustPhone] = useState("");
   const [discount, setDiscount] = useState(0);
   const [autoDiscount, setAutoDiscount] = useState(0);
   const [paid, setPaid] = useState(0);
@@ -108,10 +111,29 @@ function PosPage() {
     }
 
     setBusy(true);
+
+    let finalCustomerId = customerId === "walkin" ? null : customerId;
+    let finalCustomerName = custName.trim() || "Walk-in Customer";
+    let finalCustomerPhone = custPhone.trim() || null;
+
+    if (!finalCustomerId && finalCustomerName !== "Walk-in Customer") {
+      const existing = customers.find((c) => c.name.toLowerCase() === finalCustomerName.toLowerCase());
+      if (existing) {
+        finalCustomerId = existing.id;
+      } else {
+        const { data: newCust } = await supabase
+          .from("customers")
+          .insert({ name: finalCustomerName, phone: finalCustomerPhone, branch_id: billingBranch })
+          .select("id")
+          .single();
+        if (newCust) finalCustomerId = newCust.id;
+      }
+    }
+
     const args = {
       _branch_id: billingBranch,
-      _customer_id: customerId === "walkin" ? null : customerId,
-      _customer_name: customerId === "walkin" ? "Walk-in Customer" : (customers.find((c) => c.id === customerId)?.name ?? null),
+      _customer_id: finalCustomerId,
+      _customer_name: finalCustomerName,
       _discount: totalDiscount,
       _paid_amount: paid || total,
       _payment_method: method,
@@ -123,6 +145,7 @@ function PosPage() {
         price: l.price,
         purchase_price: Number(l.product.purchase_price),
       })),
+      _customer_phone: finalCustomerPhone,
     };
     const { data, error } = await supabase.rpc("create_sale", args as never);
     setBusy(false);
@@ -142,7 +165,8 @@ function PosPage() {
       invoice: (sale as { invoice_number: string } | null)?.invoice_number ?? "—",
       date: (sale as { created_at: string } | null)?.created_at ?? new Date().toISOString(),
       branch: branches.find((b) => b.id === billingBranch)?.name ?? "",
-      customer: args._customer_name ?? "Walk-in Customer",
+      customer: finalCustomerName,
+      phone: finalCustomerPhone || undefined,
       lines: lines.map((l) => ({ name: l.product.name, quantity: l.quantity, price: l.price })),
       subtotal,
       discount: totalDiscount,
@@ -245,17 +269,54 @@ function PosPage() {
             <CardTitle className="text-base">Invoice</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
-            <div className="space-y-1.5">
-              <Label>Customer</Label>
-              <Select value={customerId} onValueChange={setCustomerId}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="walkin">Walk-in Customer</SelectItem>
-                  {customers.map((c) => (
-                    <SelectItem key={c.id} value={c.id}>{c.name}{c.phone ? ` · ${c.phone}` : ""}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+            <div className="space-y-3">
+              <div className="space-y-1.5">
+                <Label>Select Saved Customer (Optional)</Label>
+                <Select
+                  value={customerId}
+                  onValueChange={(val) => {
+                    setCustomerId(val);
+                    if (val === "walkin") {
+                      setCustName("Walk-in Customer");
+                      setCustPhone("");
+                    } else {
+                      const c = customers.find((x) => x.id === val);
+                      if (c) {
+                        setCustName(c.name);
+                        setCustPhone(c.phone ?? "");
+                      }
+                    }
+                  }}
+                >
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="walkin">Walk-in Customer</SelectItem>
+                    {customers.map((c) => (
+                      <SelectItem key={c.id} value={c.id}>{c.name}{c.phone ? ` · ${c.phone}` : ""}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1.5">
+                  <Label>Customer Name <span className="text-destructive">*</span></Label>
+                  <Input
+                    required
+                    placeholder="e.g. Ali Raza"
+                    value={custName}
+                    onChange={(e) => setCustName(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Phone Number (Optional)</Label>
+                  <Input
+                    placeholder="e.g. 03001234567"
+                    value={custPhone}
+                    onChange={(e) => setCustPhone(e.target.value)}
+                  />
+                </div>
+              </div>
             </div>
 
             <div className="rounded-md border p-3 text-sm">
@@ -336,7 +397,7 @@ function ReceiptDialog({ receipt, onClose }: { receipt: Receipt | null; onClose:
             </div>
             <div className="flex justify-between text-xs text-muted-foreground">
               <span>{new Date(receipt.date).toLocaleString()}</span>
-              <span>{receipt.customer}</span>
+              <span>{receipt.customer}{receipt.phone ? ` (${receipt.phone})` : ""}</span>
             </div>
             <div className="border-t pt-2">
               {receipt.lines.map((l, i) => (
