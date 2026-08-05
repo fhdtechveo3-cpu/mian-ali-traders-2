@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
-import { Search, RotateCcw, Download, CheckCircle2 } from "lucide-react";
+import { Search, RotateCcw, Download, Undo2, Receipt } from "lucide-react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
 import { StatCard } from "@/components/StatCard";
@@ -61,7 +61,7 @@ function ReturnsPage() {
 
   const itemsForSelectedSale = useMemo(() => {
     if (!selectedSale) return [];
-    return saleItems.filter((i) => i.sales?.branch_id === selectedSale.branch_id && i.sales?.created_at === selectedSale.created_at);
+    return saleItems.filter((i) => (i as unknown as { sale_id: string }).sale_id === selectedSale.id || (i.sales?.branch_id === selectedSale.branch_id && i.sales?.created_at === selectedSale.created_at));
   }, [saleItems, selectedSale]);
 
   const handleSelectProductToReturn = (item: typeof saleItems[0]) => {
@@ -112,7 +112,36 @@ function ReturnsPage() {
     setReason("");
   };
 
+  // Financial 7-Card Calculations
+  const grossRevenue = useMemo(() => sales.reduce((sum, s) => sum + Number(s.total), 0), [sales]);
   const totalRefundsValue = useMemo(() => returns.reduce((sum, r) => sum + Number(r.refund_amount), 0), [returns]);
+  const netRevenue = grossRevenue - totalRefundsValue;
+  const totalOutstanding = useMemo(() => sales.reduce((sum, s) => sum + Number(s.remaining_amount), 0), [sales]);
+
+  const todayNet = useMemo(() => {
+    const today = new Date().toDateString();
+    const todaySales = sales.filter((s) => new Date(s.created_at).toDateString() === today).reduce((sum, s) => sum + Number(s.total), 0);
+    const todayReturns = returns.filter((r) => new Date(r.created_at).toDateString() === today).reduce((sum, r) => sum + Number(r.refund_amount), 0);
+    return todaySales - todayReturns;
+  }, [sales, returns]);
+
+  const weekNet = useMemo(() => {
+    const now = new Date().getTime();
+    const weekSales = sales.filter((s) => (now - new Date(s.created_at).getTime()) <= 7 * 86400000).reduce((sum, s) => sum + Number(s.total), 0);
+    const weekReturns = returns.filter((r) => (now - new Date(r.created_at).getTime()) <= 7 * 86400000).reduce((sum, r) => sum + Number(r.refund_amount), 0);
+    return weekSales - weekReturns;
+  }, [sales, returns]);
+
+  const monthNet = useMemo(() => {
+    const now = new Date();
+    const isThisMonth = (d: string) => {
+      const t = new Date(d);
+      return t.getMonth() === now.getMonth() && t.getFullYear() === now.getFullYear();
+    };
+    const monthSales = sales.filter((s) => isThisMonth(s.created_at)).reduce((sum, s) => sum + Number(s.total), 0);
+    const monthReturns = returns.filter((r) => isThisMonth(r.created_at)).reduce((sum, r) => sum + Number(r.refund_amount), 0);
+    return monthSales - monthReturns;
+  }, [sales, returns]);
 
   const filteredLogs = useMemo(() => {
     const q = logSearch.trim().toLowerCase();
@@ -141,13 +170,20 @@ function ReturnsPage() {
   return (
     <AppShell title="Returns & Refunds" subtitle="Process product returns, restore stock levels and track cash refunds">
       <div className="space-y-6">
-        <div className="grid gap-4 sm:grid-cols-2">
-          <StatCard title="Total Return Transactions" value={returns.length} sub="Returned items count" />
-          <StatCard title="Total Refunded Amount" value={PKR(totalRefundsValue)} sub="Deducted from revenue" />
+        {/* 7-Card Financial Panel */}
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
+          <StatCard title="Gross Sales" value={PKR(grossRevenue)} sub="Total original sales" />
+          <StatCard title="Total Refunds" value={PKR(totalRefundsValue)} tone="destructive" sub="Deducted returns" />
+          <StatCard title="Net Revenue" value={PKR(netRevenue)} tone="success" sub="Actual income after returns" />
+          <StatCard title="Outstanding" value={PKR(totalOutstanding)} tone={totalOutstanding > 0 ? "warning" : "default"} sub="Customer due" />
+          <StatCard title="Today's Net" value={PKR(todayNet)} tone="success" sub="Net sales today" />
+          <StatCard title="This Week's Net" value={PKR(weekNet)} tone="success" sub="Net sales 7 days" />
+          <StatCard title="This Month's Net" value={PKR(monthNet)} tone="success" sub="Net sales this month" />
         </div>
 
         <div className="grid gap-6 lg:grid-cols-12">
-          <Card className="lg:col-span-5">
+          {/* Invoice Search & Return Processing Column */}
+          <Card className="lg:col-span-6">
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-base font-semibold">
                 <RotateCcw className="h-5 w-5 text-primary" /> Process Item Return
@@ -169,62 +205,110 @@ function ReturnsPage() {
 
               {searchInvoice.trim() && (
                 <div className="max-h-48 space-y-1 overflow-y-auto rounded-md border p-2 text-sm">
-                  {filteredSales.map((s) => (
-                    <button
-                      key={s.id}
-                      type="button"
-                      onClick={() => {
-                        setSelectedSale(s);
-                        setSelectedItem(null);
-                      }}
-                      className={`flex w-full items-center justify-between rounded p-2 text-left transition-colors ${
-                        selectedSale?.id === s.id ? "bg-primary/10 font-medium text-primary" : "hover:bg-accent"
-                      }`}
-                    >
-                      <div>
-                        <p className="font-semibold">{s.invoice_number}</p>
-                        <p className="text-xs text-muted-foreground">{s.customer_name || "Walk-in Customer"}</p>
-                      </div>
-                      <Badge variant="outline">{PKR(s.total)}</Badge>
-                    </button>
-                  ))}
+                  {filteredSales.map((s) => {
+                    const phone = (s as unknown as { customer_phone?: string }).customer_phone;
+                    return (
+                      <button
+                        key={s.id}
+                        type="button"
+                        onClick={() => {
+                          setSelectedSale(s);
+                          setSelectedItem(null);
+                        }}
+                        className={`flex w-full items-center justify-between rounded p-2 text-left transition-colors ${
+                          selectedSale?.id === s.id ? "bg-primary/10 font-medium text-primary" : "hover:bg-accent"
+                        }`}
+                      >
+                        <div>
+                          <p className="font-semibold">{s.invoice_number}</p>
+                          <p className="text-xs text-muted-foreground">{s.customer_name || "Walk-in"}{phone ? ` · ${phone}` : ""}</p>
+                        </div>
+                        <Badge variant="outline">{PKR(s.total)}</Badge>
+                      </button>
+                    );
+                  })}
                   {!filteredSales.length && <p className="p-2 text-center text-xs text-muted-foreground">No matching invoices found.</p>}
                 </div>
               )}
 
+              {/* Full Original Digital Invoice Preview Card */}
               {selectedSale && (
-                <div className="rounded-md border bg-card p-3 space-y-3">
-                  <div className="flex justify-between border-b pb-2 text-xs">
-                    <span className="font-medium text-foreground">Selected Invoice: {selectedSale.invoice_number}</span>
-                    <span className="text-muted-foreground">{new Date(selectedSale.created_at).toLocaleDateString()}</span>
+                <div className="rounded-md border bg-card p-4 space-y-3 shadow-sm">
+                  <div className="flex items-center justify-between border-b pb-2">
+                    <div>
+                      <h4 className="font-semibold text-sm flex items-center gap-1.5">
+                        <Receipt className="h-4 w-4 text-primary" /> Invoice {selectedSale.invoice_number}
+                      </h4>
+                      <p className="text-xs text-muted-foreground">
+                        {branches.find((b) => b.id === selectedSale.branch_id)?.name} · {new Date(selectedSale.created_at).toLocaleString()}
+                      </p>
+                    </div>
+                    <Badge variant="secondary">Original Invoice</Badge>
                   </div>
 
-                  <p className="text-xs font-semibold text-muted-foreground">Select Product to Return:</p>
+                  <div className="rounded bg-muted/50 p-2 text-xs grid grid-cols-2 gap-2">
+                    <p><strong>Customer:</strong> {selectedSale.customer_name || "Walk-in Customer"}</p>
+                    <p><strong>Phone:</strong> {(selectedSale as unknown as { customer_phone?: string }).customer_phone || "—"}</p>
+                    <p><strong>Payment Method:</strong> {selectedSale.payment_method}</p>
+                    <p><strong>Discount Given:</strong> {PKR(selectedSale.discount)}</p>
+                  </div>
 
-                  <div className="space-y-1.5 max-h-40 overflow-y-auto">
-                    {itemsForSelectedSale.map((item) => (
-                      <div
-                        key={item.id}
-                        onClick={() => handleSelectProductToReturn(item)}
-                        className={`flex cursor-pointer items-center justify-between rounded-md border p-2 text-xs transition-colors ${
-                          selectedItem?.id === item.id ? "border-primary bg-primary/5" : "hover:bg-accent"
-                        }`}
-                      >
-                        <div>
-                          <p className="font-medium">{item.product_name}</p>
-                          <p className="text-muted-foreground">Qty Sold: {item.quantity} · Rate: {PKR(item.price)}</p>
-                        </div>
-                        {selectedItem?.id === item.id && <CheckCircle2 className="h-4 w-4 text-primary" />}
-                      </div>
-                    ))}
-                    {!itemsForSelectedSale.length && <p className="text-xs text-muted-foreground">No line items recorded for this invoice.</p>}
+                  <p className="text-xs font-semibold text-muted-foreground pt-1">Purchased Line Items:</p>
+
+                  <div className="rounded border overflow-x-auto">
+                    <Table className="text-xs">
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Item Name</TableHead>
+                          <TableHead className="text-right">Qty</TableHead>
+                          <TableHead className="text-right">Rate</TableHead>
+                          <TableHead className="text-right">Total</TableHead>
+                          <TableHead />
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {itemsForSelectedSale.map((item) => (
+                          <TableRow key={item.id}>
+                            <TableCell className="font-medium">{item.product_name}</TableCell>
+                            <TableCell className="text-right">{item.quantity}</TableCell>
+                            <TableCell className="text-right">{PKR(item.price)}</TableCell>
+                            <TableCell className="text-right font-semibold">{PKR(item.line_total)}</TableCell>
+                            <TableCell className="text-right">
+                              <Button
+                                size="sm"
+                                variant="destructive"
+                                className="h-7 px-2 text-xs"
+                                onClick={() => handleSelectProductToReturn(item)}
+                              >
+                                <Undo2 className="mr-1 h-3 w-3" /> Return
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                        {!itemsForSelectedSale.length && (
+                          <TableRow>
+                            <TableCell colSpan={5} className="py-4 text-center text-xs text-muted-foreground">
+                              No items recorded for this invoice.
+                            </TableCell>
+                          </TableRow>
+                        )}
+                      </TableBody>
+                    </Table>
+                  </div>
+
+                  <div className="flex justify-between border-t pt-2 text-xs font-medium">
+                    <span>Subtotal: {PKR(selectedSale.subtotal)}</span>
+                    <span>Paid: {PKR(selectedSale.paid_amount)}</span>
+                    <span className="text-destructive">Due: {PKR(selectedSale.remaining_amount)}</span>
+                    <span className="font-bold text-sm">Total: {PKR(selectedSale.total)}</span>
                   </div>
                 </div>
               )}
             </CardContent>
           </Card>
 
-          <Card className="lg:col-span-7">
+          {/* Returns History Log Column */}
+          <Card className="lg:col-span-6">
             <CardHeader className="flex flex-row items-center justify-between pb-3">
               <CardTitle className="text-base font-semibold">Returns History & Log</CardTitle>
               <Button size="sm" variant="outline" onClick={handleExport}>
@@ -280,6 +364,7 @@ function ReturnsPage() {
         </div>
       </div>
 
+      {/* Return Action Confirmation Modal */}
       <Dialog open={!!selectedItem} onOpenChange={(v) => !v && setSelectedItem(null)}>
         <DialogContent className="max-w-md">
           <DialogHeader>
@@ -289,6 +374,7 @@ function ReturnsPage() {
             <div className="space-y-4 pt-2">
               <div className="rounded-md bg-muted p-3 text-xs space-y-1">
                 <p><strong>Original Invoice:</strong> {selectedSale?.invoice_number}</p>
+                <p><strong>Customer Name:</strong> {selectedSale?.customer_name || "Walk-in Customer"}</p>
                 <p><strong>Max Quantity Sold:</strong> {selectedItem.quantity}</p>
                 <p><strong>Original Unit Rate:</strong> {PKR(selectedItem.price)}</p>
               </div>
@@ -323,7 +409,7 @@ function ReturnsPage() {
                 <Label>Return Reason / Note</Label>
                 <Textarea
                   rows={2}
-                  placeholder="e.g. Expired medicine, Customer returned damaged box"
+                  placeholder="e.g. Panadol box returned undamaged"
                   value={reason}
                   onChange={(e) => setReason(e.target.value)}
                 />

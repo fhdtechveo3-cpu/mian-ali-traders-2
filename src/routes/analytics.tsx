@@ -100,11 +100,13 @@ function AnalyticsPage() {
         </Tabs>
       }
     >
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard label="Revenue" value={PKR(revenue)} tone="success" />
-        {isAdmin && <StatCard label="Profit" value={PKR(profit)} tone="success" hint={revenue ? `${((profit / revenue) * 100).toFixed(1)}% margin` : "No sales yet"} />}
-        <StatCard label="Invoices" value={scoped.length} />
-        <StatCard label="Average bill" value={PKR(avg)} hint={`Discounts given ${PKR(discount)}`} />
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6">
+        <StatCard label="Gross Revenue" value={PKR(grossRevenue)} hint="Original sales" />
+        <StatCard label="Total Refunds" value={PKR(totalRefunds)} tone="destructive" hint="Returned items" />
+        <StatCard label="Net Revenue" value={PKR(revenue)} tone="success" hint="Income after returns" />
+        {isAdmin && <StatCard label="Profit" value={PKR(profit)} tone="success" hint={revenue ? `${((profit / revenue) * 100).toFixed(1)}% margin` : "No sales"} />}
+        <StatCard label="Invoices" value={scoped.length} hint={`Avg ${PKR(avg)}`} />
+        <StatCard label="Discounts" value={PKR(discount)} hint="Total given" />
       </div>
 
       <Card className="mt-5">
