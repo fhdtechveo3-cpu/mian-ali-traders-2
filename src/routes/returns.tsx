@@ -261,24 +261,52 @@ function ReturnsPage() {
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {itemsForSelectedSale.map((item) => (
-                          <TableRow key={item.id}>
-                            <TableCell className="font-medium">{item.product_name}</TableCell>
-                            <TableCell className="text-right">{item.quantity}</TableCell>
-                            <TableCell className="text-right">{PKR(item.price)}</TableCell>
-                            <TableCell className="text-right font-semibold">{PKR(item.line_total)}</TableCell>
-                            <TableCell className="text-right">
-                              <Button
-                                size="sm"
-                                variant="destructive"
-                                className="h-7 px-2 text-xs"
-                                onClick={() => handleSelectProductToReturn(item)}
-                              >
-                                <Undo2 className="mr-1 h-3 w-3" /> Return
-                              </Button>
-                            </TableCell>
-                          </TableRow>
-                        ))}
+                        {itemsForSelectedSale.map((item) => {
+                          const returnedSoFar = returns
+                            .filter(
+                              (r) =>
+                                (r.sale_id === selectedSale.id || r.invoice_number === selectedSale.invoice_number) &&
+                                (r.product_id === item.product_id || r.product_name === item.product_name)
+                            )
+                            .reduce((sum, r) => sum + Number(r.quantity), 0);
+
+                          const remainingReturnable = Math.max(0, Number(item.quantity) - returnedSoFar);
+
+                          return (
+                            <TableRow key={item.id}>
+                              <TableCell className="font-medium">{item.product_name}</TableCell>
+                              <TableCell className="text-right">
+                                {item.quantity}
+                                {returnedSoFar > 0 && (
+                                  <span className="block text-[10px] text-muted-foreground">Ret: {returnedSoFar}</span>
+                                )}
+                              </TableCell>
+                              <TableCell className="text-right">{PKR(item.price)}</TableCell>
+                              <TableCell className="text-right font-semibold">{PKR(item.line_total)}</TableCell>
+                              <TableCell className="text-right">
+                                {remainingReturnable <= 0 ? (
+                                  <Badge variant="outline" className="border-destructive/30 bg-destructive/10 text-destructive text-[10px]">
+                                    Already Returned
+                                  </Badge>
+                                ) : (
+                                  <Button
+                                    size="sm"
+                                    variant="destructive"
+                                    className="h-7 px-2 text-xs"
+                                    onClick={() =>
+                                      handleSelectProductToReturn({
+                                        ...item,
+                                        quantity: remainingReturnable,
+                                      })
+                                    }
+                                  >
+                                    <Undo2 className="mr-1 h-3 w-3" /> Return ({remainingReturnable})
+                                  </Button>
+                                )}
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
                         {!itemsForSelectedSale.length && (
                           <TableRow>
                             <TableCell colSpan={5} className="py-4 text-center text-xs text-muted-foreground">

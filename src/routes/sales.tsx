@@ -227,14 +227,32 @@ function SalesPage() {
               <TableBody>
                 {filtered.map((s) => {
                   const phone = (s as unknown as { customer_phone?: string }).customer_phone;
+                  const invoiceReturns = returns.filter((r) => r.sale_id === s.id || r.invoice_number === s.invoice_number);
+                  const hasReturn = invoiceReturns.length > 0;
+                  const refundedSum = invoiceReturns.reduce((sum, r) => sum + Number(r.refund_amount), 0);
+
                   return (
                     <TableRow key={s.id} className="cursor-pointer" onClick={() => setOpen(s)}>
-                      <TableCell className="font-medium">{s.invoice_number}</TableCell>
+                      <TableCell className="font-medium">
+                        <div className="flex items-center gap-1.5">
+                          <span>{s.invoice_number}</span>
+                          {hasReturn && (
+                            <Badge variant="destructive" className="bg-red-600 text-white hover:bg-red-700 px-1.5 py-0 text-[10px]">
+                              RETURNED
+                            </Badge>
+                          )}
+                        </div>
+                      </TableCell>
                       <TableCell className="text-xs">{new Date(s.created_at).toLocaleString()}</TableCell>
                       <TableCell>{s.customer_name || "Walk-in"}</TableCell>
                       <TableCell className="text-xs text-muted-foreground">{phone || "—"}</TableCell>
                       <TableCell className="text-xs">{branches.find((b) => b.id === s.branch_id)?.city}</TableCell>
-                      <TableCell className="text-right font-medium">{PKR(s.total)}</TableCell>
+                      <TableCell className="text-right font-medium">
+                        {PKR(s.total)}
+                        {hasReturn && (
+                          <span className="block text-[10px] text-destructive font-semibold">Ref: -{PKR(refundedSum)}</span>
+                        )}
+                      </TableCell>
                       <TableCell className="text-right">{Number(s.remaining_amount) > 0 ? <Badge variant="destructive">{PKR(s.remaining_amount)}</Badge> : "—"}</TableCell>
                       <TableCell className="text-xs capitalize">{s.payment_method}</TableCell>
                       <TableCell className="text-right"><Button size="sm" variant="ghost">View</Button></TableCell>
@@ -250,7 +268,14 @@ function SalesPage() {
 
       <Dialog open={!!open} onOpenChange={(v) => !v && setOpen(null)}>
         <DialogContent className="max-w-lg">
-          <DialogHeader><DialogTitle>Invoice {open?.invoice_number}</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              Invoice {open?.invoice_number}
+              {open && returns.some((r) => r.sale_id === open.id || r.invoice_number === open.invoice_number) && (
+                <Badge variant="destructive" className="bg-red-600 text-white text-xs">RETURNED</Badge>
+              )}
+            </DialogTitle>
+          </DialogHeader>
           {open && (
             <div id="invoice-print" className="space-y-3 text-sm">
               <div className="text-center">

@@ -495,9 +495,35 @@ create or replace function public.process_return(
 language plpgsql security definer set search_path = public as $$
 declare
   v_return_id uuid;
+  v_original_qty numeric := 0;
+  v_already_returned numeric := 0;
+  v_max_returnable numeric := 0;
 begin
   if not (public.is_admin() or _branch_id = public.my_branch()) then
     raise exception 'Not allowed for this branch';
+  end if;
+
+  select coalesce(sum(quantity), 0) into v_original_qty
+  from public.sale_items
+  where sale_id = _sale_id and (product_id = _product_id or product_name = _product_name);
+
+  if v_original_qty <= 0 then
+    raise exception 'Original purchased item not found in this sale';
+  end if;
+
+  select coalesce(sum(quantity), 0) into v_already_returned
+  from public.sales_returns
+  where (sale_id = _sale_id or invoice_number = _invoice_number)
+    and (product_id = _product_id or product_name = _product_name);
+
+  v_max_returnable := v_original_qty - v_already_returned;
+
+  if v_max_returnable <= 0 then
+    raise exception 'This item has already been fully returned for this invoice!';
+  end if;
+
+  if _quantity > v_max_returnable then
+    raise exception 'Cannot return % units. Only % units remain returnable for this invoice.', _quantity, v_max_returnable;
   end if;
 
   insert into public.sales_returns (
@@ -515,7 +541,7 @@ begin
   insert into public.stock_movements (
     product_id, branch_id, movement_type, quantity, reference, note, created_by
   ) values (
-    _product_id, _branch_id, 'return', _quantity, _invoice_number, coalesce(_reason, 'Product Return'), auth.uid()
+    _product_id, _branch_id, 'adjustment_in', _quantity, _invoice_number, coalesce(_reason, 'Product Return'), auth.uid()
   );
 
   return v_return_id;
