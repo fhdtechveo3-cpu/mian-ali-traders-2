@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
 import { StatCard } from "@/components/StatCard";
 import { useAuth } from "@/lib/auth";
-import { useSaleItems, useSales } from "@/lib/queries";
+import { useSaleItems, useSales, useReturns } from "@/lib/queries";
 import { PKR, exportRows, type Sale } from "@/lib/pos";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent } from "@/components/ui/card";
@@ -23,9 +23,9 @@ export const Route = createFileRoute("/sales")({
   head: () => ({
     meta: [
       { title: "Sales & Invoices — Mian Ali Traders POS" },
-      { name: "description", content: "Search every invoice by number, customer name or phone number, edit invoices as admin, and reprint receipts." },
+      { name: "description", content: "Search every invoice by number, customer name or phone number, edit invoices as admin, and review daily, weekly and monthly sales." },
       { property: "og:title", content: "Sales & Invoices — Mian Ali Traders POS" },
-      { property: "og:description", content: "Complete invoice history with multi-field search, admin invoice editing and Excel export." },
+      { property: "og:description", content: "Complete invoice history with multi-field search, admin invoice editing and daily/weekly/monthly revenue summary." },
     ],
   }),
   component: SalesPage,
@@ -36,6 +36,7 @@ function SalesPage() {
   const qc = useQueryClient();
   const { data: sales = [] } = useSales(activeBranch);
   const { data: items = [] } = useSaleItems();
+  const { data: returns = [] } = useReturns(activeBranch);
   
   const [term, setTerm] = useState("");
   const [from, setFrom] = useState("");
@@ -64,9 +65,36 @@ function SalesPage() {
     });
   }, [sales, term, from, to]);
 
-  const revenue = filtered.reduce((a, s) => a + Number(s.total), 0);
-  const profit = filtered.reduce((a, s) => a + Number(s.profit), 0);
+  const grossRevenue = filtered.reduce((a, s) => a + Number(s.total), 0);
+  const totalRefunds = returns.reduce((a, r) => a + Number(r.refund_amount), 0);
+  const netRevenue = grossRevenue - totalRefunds;
+  const profit = filtered.reduce((a, s) => a + Number(s.profit), 0) - totalRefunds;
   const due = filtered.reduce((a, s) => a + Number(s.remaining_amount), 0);
+
+  const todayNet = useMemo(() => {
+    const today = new Date().toDateString();
+    const todaySales = sales.filter((s) => new Date(s.created_at).toDateString() === today).reduce((sum, s) => sum + Number(s.total), 0);
+    const todayReturns = returns.filter((r) => new Date(r.created_at).toDateString() === today).reduce((sum, r) => sum + Number(r.refund_amount), 0);
+    return todaySales - todayReturns;
+  }, [sales, returns]);
+
+  const weekNet = useMemo(() => {
+    const now = new Date().getTime();
+    const weekSales = sales.filter((s) => (now - new Date(s.created_at).getTime()) <= 7 * 86400000).reduce((sum, s) => sum + Number(s.total), 0);
+    const weekReturns = returns.filter((r) => (now - new Date(r.created_at).getTime()) <= 7 * 86400000).reduce((sum, r) => sum + Number(r.refund_amount), 0);
+    return weekSales - weekReturns;
+  }, [sales, returns]);
+
+  const monthNet = useMemo(() => {
+    const now = new Date();
+    const isThisMonth = (d: string) => {
+      const t = new Date(d);
+      return t.getMonth() === now.getMonth() && t.getFullYear() === now.getFullYear();
+    };
+    const monthSales = sales.filter((s) => isThisMonth(s.created_at)).reduce((sum, s) => sum + Number(s.total), 0);
+    const monthReturns = returns.filter((r) => isThisMonth(r.created_at)).reduce((sum, r) => sum + Number(r.refund_amount), 0);
+    return monthSales - monthReturns;
+  }, [sales, returns]);
 
   const invoiceItems = open ? items.filter((i) => (i as unknown as { sale_id: string }).sale_id === open.id) : [];
 
@@ -140,11 +168,14 @@ function SalesPage() {
         </Button>
       }
     >
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard label="Invoices" value={filtered.length} />
-        <StatCard label="Revenue" value={PKR(revenue)} tone="success" />
-        {isAdmin && <StatCard label="Profit" value={PKR(profit)} tone="success" />}
-        <StatCard label="Outstanding" value={PKR(due)} tone={due > 0 ? "warning" : "default"} />
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
+        <StatCard title="Gross Sales" value={PKR(grossRevenue)} sub="Total original sales" />
+        <StatCard title="Total Refunds" value={PKR(totalRefunds)} tone="destructive" sub="Deducted returns" />
+        <StatCard title="Net Revenue" value={PKR(netRevenue)} tone="success" sub="After returns" />
+        {isAdmin && <StatCard title="Total Profit" value={PKR(profit)} tone="success" sub="Net profit" />}
+        <StatCard title="Today's Sales" value={PKR(todayNet)} tone="success" sub="Net sales today" />
+        <StatCard title="This Week" value={PKR(weekNet)} tone="success" sub="Net sales 7 days" />
+        <StatCard title="This Month" value={PKR(monthNet)} tone="success" sub="Net sales this month" />
       </div>
 
       <Card className="mt-5">

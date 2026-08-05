@@ -170,15 +170,9 @@ function ReturnsPage() {
   return (
     <AppShell title="Returns & Refunds" subtitle="Process product returns, restore stock levels and track cash refunds">
       <div className="space-y-6">
-        {/* 7-Card Financial Panel */}
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
-          <StatCard title="Gross Sales" value={PKR(grossRevenue)} sub="Total original sales" />
-          <StatCard title="Total Refunds" value={PKR(totalRefundsValue)} tone="destructive" sub="Deducted returns" />
-          <StatCard title="Net Revenue" value={PKR(netRevenue)} tone="success" sub="Actual income after returns" />
-          <StatCard title="Outstanding" value={PKR(totalOutstanding)} tone={totalOutstanding > 0 ? "warning" : "default"} sub="Customer due" />
-          <StatCard title="Today's Net" value={PKR(todayNet)} tone="success" sub="Net sales today" />
-          <StatCard title="This Week's Net" value={PKR(weekNet)} tone="success" sub="Net sales 7 days" />
-          <StatCard title="This Month's Net" value={PKR(monthNet)} tone="success" sub="Net sales this month" />
+        <div className="grid gap-4 sm:grid-cols-2">
+          <StatCard title="Total Return Transactions" value={returns.length} sub="Returned items count" />
+          <StatCard title="Total Refunded Amount" value={PKR(totalRefundsValue)} tone="destructive" sub="Deducted cash refunds" />
         </div>
 
         <div className="grid gap-6 lg:grid-cols-12">
