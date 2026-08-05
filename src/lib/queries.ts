@@ -106,3 +106,28 @@ export function useMovements(branch: string) {
     },
   });
 }
+
+export function useReturns(branch: string) {
+  return useQuery({
+    queryKey: ["sales_returns", branch],
+    queryFn: async () => {
+      const q = supabase.from("sales_returns").select("*").order("created_at", { ascending: false }).limit(1000);
+      const { data, error } = await scope(q as never, branch);
+      if (error) throw error;
+      return (data ?? []) as unknown as Array<{
+        id: string;
+        sale_id: string | null;
+        invoice_number: string;
+        branch_id: string;
+        product_id: string;
+        product_name: string;
+        quantity: number;
+        unit_price: number;
+        refund_amount: number;
+        reason: string | null;
+        created_by: string | null;
+        created_at: string;
+      }>;
+    },
+  });
+}

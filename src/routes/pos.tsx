@@ -225,8 +225,7 @@ function PosPage() {
                   <Input
                     className="h-7 w-24"
                     type="number"
-                    disabled={!isAdmin}
-                    title={isAdmin ? "Manual price edit" : "Only admin can edit price"}
+                    title="Manual price edit"
                     value={l.price}
                     onChange={(e) => setLines((p) => p.map((x) => (x.product.id === l.product.id ? { ...x, price: Number(e.target.value) || 0 } : x)))}
                   />

@@ -3,7 +3,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { AppShell } from "@/components/AppShell";
 import { StatCard } from "@/components/StatCard";
 import { useAuth } from "@/lib/auth";
-import { useProducts, useSaleItems, useSales } from "@/lib/queries";
+import { useProducts, useReturns, useSaleItems, useSales } from "@/lib/queries";
 import { PKR, startOf } from "@/lib/pos";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -29,13 +29,17 @@ function AnalyticsPage() {
   const { data: sales = [] } = useSales(activeBranch);
   const { data: items = [] } = useSaleItems();
   const { data: products = [] } = useProducts(activeBranch);
+  const { data: returns = [] } = useReturns(activeBranch);
   const [range, setRange] = useState<Range>("month");
 
   const start = startOf(range);
   const scoped = sales.filter((s) => new Date(s.created_at) >= start);
+  const scopedReturns = returns.filter((r) => new Date(r.created_at) >= start);
 
-  const revenue = scoped.reduce((a, s) => a + Number(s.total), 0);
-  const profit = scoped.reduce((a, s) => a + Number(s.profit), 0);
+  const grossRevenue = scoped.reduce((a, s) => a + Number(s.total), 0);
+  const totalRefunds = scopedReturns.reduce((a, r) => a + Number(r.refund_amount), 0);
+  const revenue = grossRevenue - totalRefunds;
+  const profit = scoped.reduce((a, s) => a + Number(s.profit), 0) - totalRefunds;
   const discount = scoped.reduce((a, s) => a + Number(s.discount), 0);
   const avg = scoped.length ? revenue / scoped.length : 0;
 

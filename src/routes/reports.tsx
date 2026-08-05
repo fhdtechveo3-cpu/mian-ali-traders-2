@@ -3,7 +3,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { FileSpreadsheet } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { useAuth } from "@/lib/auth";
-import { useMovements, useProducts, useSaleItems, useSales } from "@/lib/queries";
+import { useMovements, useProducts, useReturns, useSaleItems, useSales } from "@/lib/queries";
 import { exportRows, stockStatus, daysToExpiry } from "@/lib/pos";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -28,6 +28,7 @@ function ReportsPage() {
   const { data: items = [] } = useSaleItems();
   const { data: products = [] } = useProducts(activeBranch);
   const { data: movements = [] } = useMovements(activeBranch);
+  const { data: returns = [] } = useReturns(activeBranch);
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [format, setFormat] = useState<"xlsx" | "csv">("xlsx");
@@ -158,6 +159,25 @@ function ReportsPage() {
             Reference: m.reference ?? m.note,
           })),
           "stock-movement-report",
+          format,
+        ),
+    },
+    {
+      title: "Returns & Refunds Report",
+      desc: "All item return transactions with refund amounts and reasons.",
+      run: () =>
+        exportRows(
+          returns.filter((r) => inRange(r.created_at)).map((r) => ({
+            "Invoice #": r.invoice_number,
+            Date: new Date(r.created_at).toLocaleString(),
+            Product: r.product_name,
+            "Returned Qty": r.quantity,
+            "Unit Price": r.unit_price,
+            "Refund Amount": r.refund_amount,
+            Reason: r.reason ?? "N/A",
+            Branch: branchName(r.branch_id),
+          })),
+          "returns-refunds-report",
           format,
         ),
     },
