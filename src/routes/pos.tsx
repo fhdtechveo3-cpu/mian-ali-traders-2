@@ -178,6 +178,10 @@ function PosPage() {
     });
 
     toast.success("Sale completed");
+    void qc.invalidateQueries({ queryKey: ["products"] });
+    void qc.invalidateQueries({ queryKey: ["product_batches"] });
+    void qc.invalidateQueries({ queryKey: ["movements"] });
+    void qc.invalidateQueries({ queryKey: ["sales"] });
     setLines([]);
     setDiscount(0);
     setAutoDiscount(0);

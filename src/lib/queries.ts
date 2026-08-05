@@ -131,3 +131,25 @@ export function useReturns(branch: string) {
     },
   });
 }
+
+export function useProductBatches(branch: string) {
+  return useQuery({
+    queryKey: ["product_batches", branch],
+    queryFn: async () => {
+      const q = supabase.from("product_batches").select("*").order("expiry_date", { ascending: true });
+      const { data, error } = await scope(q as never, branch);
+      if (error) throw error;
+      return (data ?? []) as unknown as Array<{
+        id: string;
+        product_id: string;
+        branch_id: string;
+        batch_number: string | null;
+        expiry_date: string | null;
+        purchase_price: number;
+        selling_price: number;
+        stock_quantity: number;
+        created_at: string;
+      }>;
+    },
+  });
+}

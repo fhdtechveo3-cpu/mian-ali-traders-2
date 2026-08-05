@@ -6,7 +6,7 @@ import { PackagePlus, ArrowDownCircle, ArrowUpCircle, Search, History, Check } f
 import { AppShell } from "@/components/AppShell";
 import { StatCard } from "@/components/StatCard";
 import { useAuth } from "@/lib/auth";
-import { useMovements, useProducts, useReturns, useSaleItems, useSuppliers } from "@/lib/queries";
+import { useMovements, useProducts, useProductBatches, useReturns, useSaleItems, useSuppliers } from "@/lib/queries";
 import { PKR, NUM, daysToExpiry, stockStatus, type Product } from "@/lib/pos";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -46,8 +46,12 @@ function InventoryPage() {
   const [showEntryDropdown, setShowEntryDropdown] = useState(false);
   const [qty, setQty] = useState(0);
   const [price, setPrice] = useState(0);
+  const [batchNumber, setBatchNumber] = useState("");
+  const [expiryDate, setExpiryDate] = useState("");
   const [supplierId, setSupplierId] = useState("none");
   const [note, setNote] = useState("");
+
+  const { data: batches = [] } = useProductBatches(activeBranch);
 
   // Adjustment states
   const [selectedAdjustProduct, setSelectedAdjustProduct] = useState<Product | null>(null);
@@ -105,6 +109,7 @@ function InventoryPage() {
       .from("products")
       .update({ stock_quantity: Number(p.stock_quantity) + qty, ...(price > 0 ? { purchase_price: price } : {}) })
       .eq("id", p.id);
+
     const { error: e2 } = await supabase.from("stock_movements").insert({
       product_id: p.id,
       branch_id: branchId,
@@ -112,8 +117,20 @@ function InventoryPage() {
       quantity: qty,
       purchase_price: price || Number(p.purchase_price),
       supplier_id: supplierId === "none" ? null : supplierId,
-      note: note || null,
+      note: note || (batchNumber ? `Batch: ${batchNumber}` : null),
     });
+
+    // Record batch entry
+    await supabase.from("product_batches").insert({
+      product_id: p.id,
+      branch_id: branchId,
+      batch_number: batchNumber.trim() || ("B-" + Math.floor(Math.random() * 90000 + 10000)),
+      expiry_date: expiryDate || null,
+      purchase_price: price || Number(p.purchase_price),
+      selling_price: Number(p.selling_price),
+      stock_quantity: qty,
+    });
+
     if (e1 || e2) {
       toast.error(e1?.message ?? e2?.message ?? "Failed to record stock arrival");
       return;
@@ -123,6 +140,8 @@ function InventoryPage() {
     setSearchEntryTerm("");
     setQty(0);
     setPrice(0);
+    setBatchNumber("");
+    setExpiryDate("");
     setNote("");
     void qc.invalidateQueries();
   };
@@ -301,6 +320,14 @@ function InventoryPage() {
             <div className="space-y-1.5">
               <Label className="text-xs">Purchase price (unit cost)</Label>
               <Input type="number" value={price} onChange={(e) => setPrice(Number(e.target.value) || 0)} />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Batch Number (Optional)</Label>
+              <Input placeholder="e.g. B-101" value={batchNumber} onChange={(e) => setBatchNumber(e.target.value)} />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Expiry Date (Optional)</Label>
+              <Input type="date" value={expiryDate} onChange={(e) => setExpiryDate(e.target.value)} />
             </div>
             <div className="space-y-1.5">
               <Label className="text-xs">Supplier</Label>
@@ -493,6 +520,46 @@ function InventoryPage() {
                 <div className="rounded-md border bg-card p-3">
                   <p className="text-muted-foreground">Current Stock</p>
                   <p className="text-lg font-bold text-foreground">{NUM(historyData.currentStock)} {historyProduct.unit}</p>
+                </div>
+              </div>
+
+              {/* Active Batches Breakdown */}
+              <div className="space-y-1.5">
+                <p className="text-xs font-semibold text-foreground">Active Batches Breakdown (FEFO Order):</p>
+                <div className="rounded-md border overflow-x-auto">
+                  <Table className="text-xs">
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Batch #</TableHead>
+                        <TableHead>Expiry Date</TableHead>
+                        <TableHead className="text-right">Available Qty</TableHead>
+                        <TableHead className="text-right">Purchase Price</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {batches
+                        .filter((b) => b.product_id === historyProduct.id && b.stock_quantity > 0)
+                        .map((b) => (
+                          <TableRow key={b.id}>
+                            <TableCell className="font-medium">{b.batch_number || "Standard"}</TableCell>
+                            <TableCell>
+                              <Badge variant={(daysToExpiry(b.expiry_date) ?? 99) < 90 ? "destructive" : "outline"}>
+                                {b.expiry_date || "No Expiry"}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="text-right font-bold">{NUM(b.stock_quantity)}</TableCell>
+                            <TableCell className="text-right">{PKR(b.purchase_price)}</TableCell>
+                          </TableRow>
+                        ))}
+                      {!batches.filter((b) => b.product_id === historyProduct.id && b.stock_quantity > 0).length && (
+                        <TableRow>
+                          <TableCell colSpan={4} className="py-2 text-center text-xs text-muted-foreground">
+                            No separate active batches recorded. Total stock: {NUM(historyProduct.stock_quantity)}
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </TableBody>
+                  </Table>
                 </div>
               </div>
 

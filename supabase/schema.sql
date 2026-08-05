@@ -550,6 +550,27 @@ end; $$;
 revoke execute on function public.process_return(uuid,text,uuid,uuid,text,numeric,numeric,numeric,text) from anon, public;
 grant execute on function public.process_return(uuid,text,uuid,uuid,text,numeric,numeric,numeric,text) to authenticated;
 
+-- Multi-batch and FEFO (First Expiring First Out) Migration
+create table if not exists public.product_batches (
+  id uuid primary key default gen_random_uuid(),
+  product_id uuid not null references public.products(id) on delete cascade,
+  branch_id uuid not null references public.branches(id) on delete cascade,
+  batch_number text,
+  expiry_date date,
+  purchase_price numeric(12,2) not null default 0,
+  selling_price numeric(12,2) not null default 0,
+  stock_quantity numeric(12,2) not null default 0,
+  created_at timestamptz not null default now()
+);
+
+alter table public.product_batches enable row level security;
+grant all on public.product_batches to authenticated;
+grant all on public.product_batches to service_role;
+drop policy if exists "product_batches readable" on public.product_batches;
+create policy "product_batches readable" on public.product_batches for select to authenticated using (true);
+drop policy if exists "product_batches writeable" on public.product_batches;
+create policy "product_batches writeable" on public.product_batches for all to authenticated using (true);
+
 -- ----------------------------------------------------------------- seed -----
 -- Only the two branches; product/customer data is entered through the app.
 insert into public.branches (id, name, city, phone, address) values
