@@ -267,36 +267,52 @@ function PosPage() {
                   </Button>
                 )}
               </div>
-              {lines.map((l) => (
-                <div key={l.product.id} className="flex flex-wrap items-center gap-2 rounded-md border p-2">
-                  <span className="min-w-0 flex-1 truncate text-sm">{l.product.name}</span>
-                  <div className="flex items-center gap-1">
-                    <Button size="icon" variant="outline" className="h-7 w-7" onClick={() => setLines((p) => p.map((x) => (x.product.id === l.product.id ? { ...x, quantity: Math.max(1, x.quantity - 1) } : x)))}>
-                      <Minus className="h-3 w-3" />
-                    </Button>
-                    <Input
-                      className="h-7 w-16 text-center"
-                      type="number"
-                      value={l.quantity}
-                      onChange={(e) => setLines((p) => p.map((x) => (x.product.id === l.product.id ? { ...x, quantity: Number(e.target.value) || 1 } : x)))}
-                    />
-                    <Button size="icon" variant="outline" className="h-7 w-7" onClick={() => setLines((p) => p.map((x) => (x.product.id === l.product.id ? { ...x, quantity: x.quantity + 1 } : x)))}>
-                      <Plus className="h-3 w-3" />
-                    </Button>
+              {lines.map((l) => {
+                const cost = Number(l.product.purchase_price);
+                const isBelowCost = l.price < cost;
+                const unitLoss = cost - l.price;
+                const totalLoss = unitLoss * l.quantity;
+
+                return (
+                  <div key={l.product.id} className="space-y-1 rounded-md border p-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="min-w-0 flex-1 truncate text-sm">{l.product.name}</span>
+                      <div className="flex items-center gap-1">
+                        <Button size="icon" variant="outline" className="h-7 w-7" onClick={() => setLines((p) => p.map((x) => (x.product.id === l.product.id ? { ...x, quantity: Math.max(1, x.quantity - 1) } : x)))}>
+                          <Minus className="h-3 w-3" />
+                        </Button>
+                        <Input
+                          className="h-7 w-16 text-center"
+                          type="number"
+                          value={l.quantity}
+                          onChange={(e) => setLines((p) => p.map((x) => (x.product.id === l.product.id ? { ...x, quantity: Number(e.target.value) || 1 } : x)))}
+                        />
+                        <Button size="icon" variant="outline" className="h-7 w-7" onClick={() => setLines((p) => p.map((x) => (x.product.id === l.product.id ? { ...x, quantity: x.quantity + 1 } : x)))}>
+                          <Plus className="h-3 w-3" />
+                        </Button>
+                      </div>
+                      <Input
+                        className={`h-7 w-24 ${isBelowCost ? "border-red-600 text-red-600 font-bold bg-red-50" : ""}`}
+                        type="number"
+                        title="Manual selling price edit"
+                        value={l.price}
+                        onChange={(e) => setLines((p) => p.map((x) => (x.product.id === l.product.id ? { ...x, price: Number(e.target.value) || 0 } : x)))}
+                      />
+                      <span className="w-24 text-right text-sm font-semibold">{PKR(l.quantity * l.price)}</span>
+                      <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => setLines((p) => p.filter((x) => x.product.id !== l.product.id))}>
+                        <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                      </Button>
+                    </div>
+
+                    {isBelowCost && (
+                      <div className="w-full text-[11px] text-red-600 font-semibold bg-red-500/10 px-2 py-0.5 rounded flex items-center justify-between">
+                        <span>⚠️ Below Cost Warning! Cost Rate: {PKR(cost)}</span>
+                        <span>Loss: -{PKR(totalLoss)}</span>
+                      </div>
+                    )}
                   </div>
-                  <Input
-                    className="h-7 w-24"
-                    type="number"
-                    title="Manual price edit"
-                    value={l.price}
-                    onChange={(e) => setLines((p) => p.map((x) => (x.product.id === l.product.id ? { ...x, price: Number(e.target.value) || 0 } : x)))}
-                  />
-                  <span className="w-24 text-right text-sm font-semibold">{PKR(l.quantity * l.price)}</span>
-                  <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => setLines((p) => p.filter((x) => x.product.id !== l.product.id))}>
-                    <Trash2 className="h-3.5 w-3.5 text-destructive" />
-                  </Button>
-                </div>
-              ))}
+                );
+              })}
               {!lines.length && <p className="text-sm text-muted-foreground">Cart is empty. Click a product to add it.</p>}
             </div>
           </CardContent>

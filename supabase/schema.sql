@@ -424,8 +424,12 @@ begin
   v_invoice := 'INV-' || to_char(now(),'YYMMDD') || '-' || lpad((floor(random()*100000))::text, 5, '0');
 
   for it in select * from jsonb_array_elements(_items) loop
+    select coalesce(purchase_price, 0) into v_static_cost
+    from public.products
+    where id = (it->>'product_id')::uuid;
+
     v_sub := v_sub + ((it->>'quantity')::numeric * (it->>'price')::numeric);
-    v_cost := v_cost + ((it->>'quantity')::numeric * coalesce((it->>'purchase_price')::numeric,0));
+    v_cost := v_cost + ((it->>'quantity')::numeric * v_static_cost);
   end loop;
 
   insert into public.sales(invoice_number, branch_id, customer_id, customer_name, subtotal, discount, total,
@@ -437,9 +441,13 @@ begin
   returning id into v_sale_id;
 
   for it in select * from jsonb_array_elements(_items) loop
+    select coalesce(purchase_price, 0) into v_static_cost
+    from public.products
+    where id = (it->>'product_id')::uuid;
+
     insert into public.sale_items(sale_id, product_id, product_name, quantity, price, purchase_price, line_total)
     values (v_sale_id, (it->>'product_id')::uuid, it->>'product_name', (it->>'quantity')::numeric,
-      (it->>'price')::numeric, coalesce((it->>'purchase_price')::numeric,0),
+      (it->>'price')::numeric, v_static_cost,
       (it->>'quantity')::numeric * (it->>'price')::numeric);
 
     update public.products
