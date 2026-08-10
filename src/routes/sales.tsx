@@ -254,8 +254,12 @@ function SalesPage() {
                         )}
                       </TableCell>
                       <TableCell className="text-right">{Number(s.remaining_amount) > 0 ? <Badge variant="destructive">{PKR(s.remaining_amount)}</Badge> : "—"}</TableCell>
-                      <TableCell className="text-xs capitalize">{s.payment_method}</TableCell>
-                      <TableCell className="text-right"><Button size="sm" variant="ghost">View</Button></TableCell>
+                      <TableCell className="text-right flex items-center justify-end gap-1">
+                        <Button size="xs" variant="ghost" onClick={(e) => { e.stopPropagation(); setOpen(s); }}>
+                          <Printer className="mr-1 h-3.5 w-3.5" /> Reprint
+                        </Button>
+                        <Button size="xs" variant="outline">View</Button>
+                      </TableCell>
                     </TableRow>
                   );
                 })}

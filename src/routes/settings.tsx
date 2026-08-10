@@ -2,11 +2,11 @@ import { useEffect, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ShieldCheck, Lock, AlertTriangle, History, ArrowDownCircle, Banknote, ShoppingBag } from "lucide-react";
+import { ShieldCheck, Lock, AlertTriangle, History, ArrowDownCircle, Banknote, ShoppingBag, Download } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { useAuth } from "@/lib/auth";
-import { useCancelledCartLogs, useCashReconciliations, useInvoiceAuditLogs, useMovements, usePriceOverrideLogs, useProducts } from "@/lib/queries";
-import { PKR, NUM } from "@/lib/pos";
+import { useCancelledCartLogs, useCashReconciliations, useCustomers, useInvoiceAuditLogs, useMovements, usePriceOverrideLogs, useProducts, useReturns, useSaleItems, useSales, useSuppliers } from "@/lib/queries";
+import { PKR, NUM, exportRows } from "@/lib/pos";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -75,6 +75,44 @@ function SettingsPage() {
   const { data: cashRecons = [] } = useCashReconciliations("all");
   const { data: movements = [] } = useMovements("all");
   const { data: products = [] } = useProducts("all");
+  const { data: sales = [] } = useSales("all");
+  const { data: saleItems = [] } = useSaleItems();
+  const { data: returns = [] } = useReturns("all");
+  const { data: customers = [] } = useCustomers("all");
+  const { data: suppliers = [] } = useSuppliers();
+
+  const handleDownloadBackup = () => {
+    const backupObj = {
+      backupDate: new Date().toISOString(),
+      system: "Mian Ali Traders POS",
+      branches,
+      staff,
+      products,
+      sales,
+      saleItems,
+      returns,
+      movements,
+      customers,
+      suppliers,
+      invoiceAudits,
+      priceOverrides,
+      cancelledCarts,
+      cashRecons,
+    };
+
+    const jsonStr = JSON.stringify(backupObj, null, 2);
+    const blob = new Blob([jsonStr], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `mian_ali_traders_full_backup_${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    toast.success("Full System Backup JSON file downloaded!");
+  };
 
   useEffect(() => {
     setBranchEdits(
@@ -294,13 +332,18 @@ function SettingsPage() {
       {/* Unlocked Secret Anti-Fraud Audit Vault View */}
       {isUnlocked && (
         <Card className="mt-5 border-2 border-amber-500 shadow-md bg-card">
-          <CardHeader className="pb-3 border-b bg-amber-500/10 flex flex-row items-center justify-between">
+          <CardHeader className="pb-3 border-b bg-amber-500/10 flex flex-row items-center justify-between flex-wrap gap-2">
             <CardTitle className="text-base flex items-center gap-2 text-amber-700 dark:text-amber-400">
               <ShieldCheck className="h-5 w-5" /> Owner Anti-Fraud Vault (Unlocked)
             </CardTitle>
-            <Badge variant="destructive" className="bg-red-600 text-white text-[10px]">
-              CONFIDENTIAL OWNER LOGS
-            </Badge>
+            <div className="flex items-center gap-2">
+              <Button size="xs" variant="outline" className="bg-background text-xs font-semibold" onClick={handleDownloadBackup}>
+                <Download className="mr-1.5 h-3.5 w-3.5" /> Full System Backup (.json)
+              </Button>
+              <Badge variant="destructive" className="bg-red-600 text-white text-[10px]">
+                CONFIDENTIAL OWNER LOGS
+              </Badge>
+            </div>
           </CardHeader>
           <CardContent className="p-4">
             <Tabs defaultValue="invoices">

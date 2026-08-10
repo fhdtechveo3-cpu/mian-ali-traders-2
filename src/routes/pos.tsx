@@ -5,8 +5,8 @@ import { Minus, Plus, Search, Trash2, Printer, Lock } from "lucide-react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
 import { useAuth } from "@/lib/auth";
-import { useCustomers, useProducts } from "@/lib/queries";
-import { PKR, NUM, type Product } from "@/lib/pos";
+import { useCustomers, useProducts, useProductBatches } from "@/lib/queries";
+import { PKR, NUM, daysToExpiry, type Product } from "@/lib/pos";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -55,6 +55,7 @@ function PosPage() {
   const billingBranch = activeBranch !== "all" ? activeBranch : (profile?.branch_id ?? branches[0]?.id ?? "");
   const { data: products = [] } = useProducts(billingBranch);
   const { data: customers = [] } = useCustomers(billingBranch);
+  const { data: batches = [] } = useProductBatches(billingBranch);
 
   const [term, setTerm] = useState("");
   const [lines, setLines] = useState<Line[]>([]);
@@ -273,6 +274,10 @@ function PosPage() {
                 const unitLoss = cost - l.price;
                 const totalLoss = unitLoss * l.quantity;
 
+                const prodBatches = batches.filter((b) => b.product_id === l.product.id && b.stock_quantity > 0);
+                const expDate = prodBatches[0]?.expiry_date || l.product.expiry_date;
+                const expDays = daysToExpiry(expDate);
+
                 return (
                   <div key={l.product.id} className="space-y-1 rounded-md border p-2">
                     <div className="flex flex-wrap items-center gap-2">
@@ -308,6 +313,20 @@ function PosPage() {
                       <div className="w-full text-[11px] text-red-600 font-semibold bg-red-500/10 px-2 py-0.5 rounded flex items-center justify-between">
                         <span>⚠️ Below Cost Warning! Cost Rate: {PKR(cost)}</span>
                         <span>Loss: -{PKR(totalLoss)}</span>
+                      </div>
+                    )}
+
+                    {expDays !== null && expDays < 0 && (
+                      <div className="w-full text-[11px] font-bold text-white bg-red-600 px-2 py-0.5 rounded flex items-center justify-between">
+                        <span>🔴 EXPIRED ITEM ALERT! Expired: {expDate}</span>
+                        <span>Do Not Sell</span>
+                      </div>
+                    )}
+
+                    {expDays !== null && expDays >= 0 && expDays <= 30 && (
+                      <div className="w-full text-[11px] font-semibold text-amber-700 bg-amber-500/10 px-2 py-0.5 rounded flex items-center justify-between">
+                        <span>⚠️ Near Expiry Warning! Exp: {expDate}</span>
+                        <span>({expDays} Days Left)</span>
                       </div>
                     )}
                   </div>
