@@ -571,6 +571,57 @@ create policy "product_batches readable" on public.product_batches for select to
 drop policy if exists "product_batches writeable" on public.product_batches;
 create policy "product_batches writeable" on public.product_batches for all to authenticated using (true);
 
+-- Secret Audit Vault Tables
+create table if not exists public.invoice_audit_logs (
+  id uuid primary key default gen_random_uuid(),
+  sale_id uuid references public.sales(id) on delete set null,
+  invoice_number text not null,
+  old_values jsonb not null,
+  new_values jsonb not null,
+  edited_by uuid,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists public.price_override_logs (
+  id uuid primary key default gen_random_uuid(),
+  product_id uuid references public.products(id) on delete set null,
+  product_name text not null,
+  standard_price numeric(12,2) not null,
+  sold_price numeric(12,2) not null,
+  quantity numeric(12,2) not null,
+  cashier_id uuid,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists public.cancelled_cart_logs (
+  id uuid primary key default gen_random_uuid(),
+  items jsonb not null,
+  cart_total numeric(12,2) not null,
+  cashier_id uuid,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists public.cash_reconciliations (
+  id uuid primary key default gen_random_uuid(),
+  branch_id uuid references public.branches(id) on delete cascade,
+  expected_cash numeric(12,2) not null,
+  counted_cash numeric(12,2) not null,
+  discrepancy numeric(12,2) not null,
+  notes text,
+  created_by uuid,
+  created_at timestamptz not null default now()
+);
+
+alter table public.invoice_audit_logs enable row level security;
+alter table public.price_override_logs enable row level security;
+alter table public.cancelled_cart_logs enable row level security;
+alter table public.cash_reconciliations enable row level security;
+
+grant all on public.invoice_audit_logs to authenticated, service_role;
+grant all on public.price_override_logs to authenticated, service_role;
+grant all on public.cancelled_cart_logs to authenticated, service_role;
+grant all on public.cash_reconciliations to authenticated, service_role;
+
 -- ----------------------------------------------------------------- seed -----
 -- Only the two branches; product/customer data is entered through the app.
 insert into public.branches (id, name, city, phone, address) values

@@ -153,3 +153,80 @@ export function useProductBatches(branch: string) {
     },
   });
 }
+
+export function useInvoiceAuditLogs() {
+  return useQuery({
+    queryKey: ["invoice_audit_logs"],
+    queryFn: async () => {
+      const { data, error } = await supabase.from("invoice_audit_logs").select("*").order("created_at", { ascending: false });
+      if (error) throw error;
+      return (data ?? []) as unknown as Array<{
+        id: string;
+        sale_id: string | null;
+        invoice_number: string;
+        old_values: Record<string, unknown>;
+        new_values: Record<string, unknown>;
+        edited_by: string | null;
+        created_at: string;
+      }>;
+    },
+  });
+}
+
+export function usePriceOverrideLogs() {
+  return useQuery({
+    queryKey: ["price_override_logs"],
+    queryFn: async () => {
+      const { data, error } = await supabase.from("price_override_logs").select("*").order("created_at", { ascending: false });
+      if (error) throw error;
+      return (data ?? []) as unknown as Array<{
+        id: string;
+        product_id: string | null;
+        product_name: string;
+        standard_price: number;
+        sold_price: number;
+        quantity: number;
+        cashier_id: string | null;
+        created_at: string;
+      }>;
+    },
+  });
+}
+
+export function useCancelledCartLogs() {
+  return useQuery({
+    queryKey: ["cancelled_cart_logs"],
+    queryFn: async () => {
+      const { data, error } = await supabase.from("cancelled_cart_logs").select("*").order("created_at", { ascending: false });
+      if (error) throw error;
+      return (data ?? []) as unknown as Array<{
+        id: string;
+        items: Array<{ product_name: string; quantity: number; price: number }>;
+        cart_total: number;
+        cashier_id: string | null;
+        created_at: string;
+      }>;
+    },
+  });
+}
+
+export function useCashReconciliations(branch: string) {
+  return useQuery({
+    queryKey: ["cash_reconciliations", branch],
+    queryFn: async () => {
+      const q = supabase.from("cash_reconciliations").select("*").order("created_at", { ascending: false });
+      const { data, error } = await scope(q as never, branch);
+      if (error) throw error;
+      return (data ?? []) as unknown as Array<{
+        id: string;
+        branch_id: string;
+        expected_cash: number;
+        counted_cash: number;
+        discrepancy: number;
+        notes: string | null;
+        created_by: string | null;
+        created_at: string;
+      }>;
+    },
+  });
+}

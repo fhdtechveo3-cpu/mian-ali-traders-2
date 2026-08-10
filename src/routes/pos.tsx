@@ -178,16 +178,43 @@ function PosPage() {
     });
 
     toast.success("Sale completed");
+    // Background audit log for price overrides
+    lines.forEach((l) => {
+      if (Number(l.price) !== Number(l.product.selling_price)) {
+        void supabase.from("price_override_logs").insert({
+          product_id: l.product.id,
+          product_name: l.product.name,
+          standard_price: Number(l.product.selling_price),
+          sold_price: Number(l.price),
+          quantity: Number(l.quantity),
+          cashier_id: profile?.id ?? null,
+        });
+      }
+    });
+
     void qc.invalidateQueries({ queryKey: ["products"] });
     void qc.invalidateQueries({ queryKey: ["product_batches"] });
     void qc.invalidateQueries({ queryKey: ["movements"] });
     void qc.invalidateQueries({ queryKey: ["sales"] });
+    void qc.invalidateQueries({ queryKey: ["price_override_logs"] });
     setLines([]);
     setDiscount(0);
     setAutoDiscount(0);
     setPaid(0);
     setNotes("");
     void qc.invalidateQueries();
+  };
+
+  const clearCartWithAudit = async () => {
+    if (lines.length > 0) {
+      void supabase.from("cancelled_cart_logs").insert({
+        items: lines.map((l) => ({ product_name: l.product.name, quantity: l.quantity, price: l.price })),
+        cart_total: subtotal,
+        cashier_id: profile?.id ?? null,
+      });
+    }
+    setLines([]);
+    toast.info("Cart cleared");
   };
 
   return (
@@ -232,7 +259,14 @@ function PosPage() {
             </div>
 
             <div className="mt-5 space-y-2">
-              <p className="text-sm font-medium">Cart</p>
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-medium">Cart</p>
+                {lines.length > 0 && (
+                  <Button size="xs" variant="ghost" className="h-6 text-xs text-destructive hover:bg-destructive/10" onClick={clearCartWithAudit}>
+                    Clear Cart
+                  </Button>
+                )}
+              </div>
               {lines.map((l) => (
                 <div key={l.product.id} className="flex flex-wrap items-center gap-2 rounded-md border p-2">
                   <span className="min-w-0 flex-1 truncate text-sm">{l.product.name}</span>
