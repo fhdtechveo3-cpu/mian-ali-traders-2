@@ -2,31 +2,44 @@ import { useMemo, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Plus, Search, Download } from "lucide-react";
+import { Plus, Search, Download, CreditCard, Printer, Receipt } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { useAuth } from "@/lib/auth";
-import { useCustomers, useSales, useSuppliers } from "@/lib/queries";
+import { useCustomerPayments, useCustomers, useSales, useSuppliers } from "@/lib/queries";
 import { PKR, exportRows } from "@/lib/pos";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 export const Route = createFileRoute("/customers")({
   head: () => ({
     meta: [
-      { title: "Customers & Suppliers — Mian Ali Traders POS" },
-      { name: "description", content: "Maintain customer contacts with purchase history and outstanding balances, plus supplier records for both branches." },
-      { property: "og:title", content: "Customers & Suppliers — Mian Ali Traders POS" },
-      { property: "og:description", content: "Customer purchase history, dues and supplier directory." },
+      { title: "Customers & Udhaar Recovery — Mian Ali Traders POS" },
+      { name: "description", content: "Maintain customer contacts, Udhaar balances, payment recoveries and supplier records for both branches." },
+      { property: "og:title", content: "Customers & Udhaar Recovery — Mian Ali Traders POS" },
+      { property: "og:description", content: "Customer purchase history, Udhaar recovery payments and supplier directory." },
     ],
   }),
   component: CustomersPage,
 });
+
+type PaymentReceiptData = {
+  customerName: string;
+  customerPhone?: string;
+  amountPaid: number;
+  remainingDue: number;
+  paymentMethod: string;
+  date: string;
+  branchName: string;
+  notes?: string;
+};
 
 function CustomersPage() {
   const { activeBranch, profile, branches } = useAuth();
@@ -34,9 +47,20 @@ function CustomersPage() {
   const { data: customers = [] } = useCustomers(activeBranch);
   const { data: suppliers = [] } = useSuppliers();
   const { data: sales = [] } = useSales(activeBranch);
+  const { data: customerPayments = [] } = useCustomerPayments(activeBranch);
+
   const [term, setTerm] = useState("");
   const [open, setOpen] = useState<"customer" | "supplier" | null>(null);
   const [form, setForm] = useState({ name: "", phone: "", address: "", city: "" });
+
+  // Payment Recovery Dialog states
+  const [selectedPayCustomer, setSelectedPayCustomer] = useState<(typeof customers)[0] | null>(null);
+  const [payAmount, setPayAmount] = useState(0);
+  const [payMethod, setPayMethod] = useState("Cash");
+  const [payNotes, setPayNotes] = useState("");
+
+  // Printable Payment Receipt state
+  const [receiptModal, setReceiptModal] = useState<PaymentReceiptData | null>(null);
 
   const stats = useMemo(() => {
     const m = new Map<string, { spent: number; due: number; count: number }>();
@@ -48,12 +72,25 @@ function CustomersPage() {
       row.count += 1;
       m.set(s.customer_id, row);
     });
+
+    // Subtract payments received
+    customerPayments.forEach((p) => {
+      const row = m.get(p.customer_id);
+      if (row) {
+        row.due = Math.max(0, row.due - Number(p.amount));
+      }
+    });
+
     return m;
-  }, [sales]);
+  }, [sales, customerPayments]);
 
   const filtered = customers.filter((c) =>
     !term.trim() || [c.name, c.phone].some((f) => (f ?? "").toLowerCase().includes(term.toLowerCase())),
   );
+
+  const udhaarCustomers = useMemo(() => {
+    return filtered.filter((c) => (stats.get(c.id)?.due ?? 0) > 0);
+  }, [filtered, stats]);
 
   const save = async () => {
     if (!form.name.trim()) {
@@ -79,10 +116,58 @@ function CustomersPage() {
     void qc.invalidateQueries();
   };
 
+  const handleSavePayment = async () => {
+    if (!selectedPayCustomer || payAmount <= 0) {
+      toast.error("Enter a valid payment amount");
+      return;
+    }
+
+    const currentDue = stats.get(selectedPayCustomer.id)?.due ?? 0;
+    if (payAmount > currentDue && currentDue > 0) {
+      toast.warning(`Received amount PKR ${payAmount} is greater than current due PKR ${currentDue}`);
+    }
+
+    const targetBranch = activeBranch !== "all" ? activeBranch : (profile?.branch_id ?? branches[0]?.id ?? "");
+
+    const { error } = await supabase.from("customer_payments").insert({
+      customer_id: selectedPayCustomer.id,
+      branch_id: targetBranch,
+      amount: payAmount,
+      payment_method: payMethod,
+      notes: payNotes || null,
+      created_by: profile?.id ?? null,
+    });
+
+    if (error) {
+      toast.error(error.message);
+      return;
+    }
+
+    toast.success(`Udhaar payment of PKR ${payAmount} received for ${selectedPayCustomer.name}`);
+
+    const newDue = Math.max(0, currentDue - payAmount);
+    setReceiptModal({
+      customerName: selectedPayCustomer.name,
+      customerPhone: selectedPayCustomer.phone ?? undefined,
+      amountPaid: payAmount,
+      remainingDue: newDue,
+      paymentMethod: payMethod,
+      date: new Date().toISOString(),
+      branchName: branches.find((b) => b.id === targetBranch)?.name ?? "Mian Ali Traders",
+      notes: payNotes,
+    });
+
+    setSelectedPayCustomer(null);
+    setPayAmount(0);
+    setPayNotes("");
+    void qc.invalidateQueries({ queryKey: ["customer_payments"] });
+    void qc.invalidateQueries({ queryKey: ["sales"] });
+  };
+
   return (
     <AppShell
-      title="Customers & Suppliers"
-      subtitle={`${customers.length} customers · ${suppliers.length} suppliers`}
+      title="Customers & Udhaar Recovery"
+      subtitle={`${customers.length} customers (${udhaarCustomers.length} with pending Udhaar) · ${suppliers.length} suppliers`}
       actions={
         <Button
           variant="outline"
@@ -95,21 +180,24 @@ function CustomersPage() {
                 Address: c.address,
                 Purchases: stats.get(c.id)?.count ?? 0,
                 "Total Spent": stats.get(c.id)?.spent ?? 0,
-                Outstanding: stats.get(c.id)?.due ?? 0,
+                "Outstanding Udhaar": stats.get(c.id)?.due ?? 0,
               })),
-              "customers",
+              "customers_udhaar_ledger",
             )
           }
         >
-          <Download className="mr-2 h-4 w-4" /> Export
+          <Download className="mr-2 h-4 w-4" /> Export Ledger
         </Button>
       }
     >
       <Tabs defaultValue="customers">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <TabsList>
-            <TabsTrigger value="customers">Customers</TabsTrigger>
-            <TabsTrigger value="suppliers">Suppliers</TabsTrigger>
+            <TabsTrigger value="customers">All Customers ({customers.length})</TabsTrigger>
+            <TabsTrigger value="udhaar">
+              Udhaar Customers <Badge variant="destructive" className="ml-1.5 px-1.5 py-0 text-[10px] bg-red-600 text-white">{udhaarCustomers.length}</Badge>
+            </TabsTrigger>
+            <TabsTrigger value="suppliers">Suppliers ({suppliers.length})</TabsTrigger>
           </TabsList>
           <div className="flex gap-2">
             <div className="relative">
@@ -121,27 +209,112 @@ function CustomersPage() {
           </div>
         </div>
 
+        {/* All Customers Tab */}
         <TabsContent value="customers">
           <Card><CardContent className="overflow-x-auto p-4">
             <Table>
-              <TableHeader><TableRow><TableHead>Name</TableHead><TableHead>Phone</TableHead><TableHead>Address</TableHead><TableHead className="text-right">Invoices</TableHead><TableHead className="text-right">Total spent</TableHead><TableHead className="text-right">Outstanding</TableHead></TableRow></TableHeader>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Name</TableHead>
+                  <TableHead>Phone</TableHead>
+                  <TableHead>Address</TableHead>
+                  <TableHead className="text-right">Invoices</TableHead>
+                  <TableHead className="text-right">Total Spent</TableHead>
+                  <TableHead className="text-right">Outstanding Udhaar</TableHead>
+                  <TableHead className="text-right">Action</TableHead>
+                </TableRow>
+              </TableHeader>
               <TableBody>
-                {filtered.map((c) => (
-                  <TableRow key={c.id}>
-                    <TableCell className="font-medium">{c.name}</TableCell>
-                    <TableCell>{c.phone ?? "—"}</TableCell>
-                    <TableCell className="text-sm text-muted-foreground">{c.address ?? "—"}</TableCell>
-                    <TableCell className="text-right">{stats.get(c.id)?.count ?? 0}</TableCell>
-                    <TableCell className="text-right">{PKR(stats.get(c.id)?.spent ?? 0)}</TableCell>
-                    <TableCell className="text-right">{PKR(stats.get(c.id)?.due ?? 0)}</TableCell>
-                  </TableRow>
-                ))}
-                {!filtered.length && <TableRow><TableCell colSpan={6} className="py-8 text-center text-sm text-muted-foreground">No customers yet.</TableCell></TableRow>}
+                {filtered.map((c) => {
+                  const due = stats.get(c.id)?.due ?? 0;
+                  return (
+                    <TableRow key={c.id}>
+                      <TableCell className="font-medium">{c.name}</TableCell>
+                      <TableCell>{c.phone ?? "—"}</TableCell>
+                      <TableCell className="text-sm text-muted-foreground">{c.address ?? "—"}</TableCell>
+                      <TableCell className="text-right">{stats.get(c.id)?.count ?? 0}</TableCell>
+                      <TableCell className="text-right font-medium">{PKR(stats.get(c.id)?.spent ?? 0)}</TableCell>
+                      <TableCell className="text-right">
+                        {due > 0 ? (
+                          <Badge variant="destructive" className="bg-red-600 text-white font-bold">{PKR(due)}</Badge>
+                        ) : (
+                          <span className="text-emerald-600 font-semibold">Clean (Rs 0)</span>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {due > 0 && (
+                          <Button
+                            size="xs"
+                            variant="default"
+                            className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                            onClick={() => {
+                              setSelectedPayCustomer(c);
+                              setPayAmount(due);
+                            }}
+                          >
+                            <CreditCard className="mr-1 h-3.5 w-3.5" /> Receive Udhaar
+                          </Button>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+                {!filtered.length && <TableRow><TableCell colSpan={7} className="py-8 text-center text-sm text-muted-foreground">No customers found.</TableCell></TableRow>}
               </TableBody>
             </Table>
           </CardContent></Card>
         </TabsContent>
 
+        {/* Dedicated Udhaar Customers Tab */}
+        <TabsContent value="udhaar">
+          <Card><CardContent className="overflow-x-auto p-4">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Customer Name</TableHead>
+                  <TableHead>Phone Number</TableHead>
+                  <TableHead>Address</TableHead>
+                  <TableHead className="text-right">Pending Udhaar Balance</TableHead>
+                  <TableHead className="text-right">Quick Action</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {udhaarCustomers.map((c) => {
+                  const due = stats.get(c.id)?.due ?? 0;
+                  return (
+                    <TableRow key={c.id}>
+                      <TableCell className="font-semibold text-foreground">{c.name}</TableCell>
+                      <TableCell>{c.phone ?? "—"}</TableCell>
+                      <TableCell className="text-xs text-muted-foreground">{c.address ?? "—"}</TableCell>
+                      <TableCell className="text-right font-bold text-red-600 text-sm">{PKR(due)}</TableCell>
+                      <TableCell className="text-right">
+                        <Button
+                          size="sm"
+                          className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                          onClick={() => {
+                            setSelectedPayCustomer(c);
+                            setPayAmount(due);
+                          }}
+                        >
+                          <CreditCard className="mr-1.5 h-4 w-4" /> Clear Udhaar
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+                {!udhaarCustomers.length && (
+                  <TableRow>
+                    <TableCell colSpan={5} className="py-8 text-center text-sm text-emerald-600 font-semibold">
+                      🎉 No pending Udhaar customers! All customer accounts are clear.
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </CardContent></Card>
+        </TabsContent>
+
+        {/* Suppliers Tab */}
         <TabsContent value="suppliers">
           <Card><CardContent className="overflow-x-auto p-4">
             <Table>
@@ -161,6 +334,118 @@ function CustomersPage() {
         </TabsContent>
       </Tabs>
 
+      {/* Receive Udhaar Payment Modal */}
+      <Dialog open={!!selectedPayCustomer} onOpenChange={(v) => !v && setSelectedPayCustomer(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base">
+              <CreditCard className="h-5 w-5 text-emerald-600" /> Receive Udhaar Payment
+            </DialogTitle>
+          </DialogHeader>
+          {selectedPayCustomer && (
+            <div className="space-y-4 pt-2">
+              <div className="rounded-md border bg-muted/30 p-3 space-y-1 text-xs">
+                <p><span className="font-semibold">Customer:</span> {selectedPayCustomer.name}</p>
+                <p><span className="font-semibold">Phone:</span> {selectedPayCustomer.phone || "—"}</p>
+                <p className="text-sm font-bold text-red-600 pt-1">
+                  Current Udhaar Due: {PKR(stats.get(selectedPayCustomer.id)?.due ?? 0)}
+                </p>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label className="text-xs">Amount Received (PKR) *</Label>
+                <Input
+                  type="number"
+                  min={1}
+                  value={payAmount}
+                  onChange={(e) => setPayAmount(Number(e.target.value) || 0)}
+                  autoFocus
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label className="text-xs">Payment Method</Label>
+                <Select value={payMethod} onValueChange={setPayMethod}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Cash">Cash</SelectItem>
+                    <SelectItem value="Bank Transfer">Bank Transfer</SelectItem>
+                    <SelectItem value="EasyPaisa">EasyPaisa</SelectItem>
+                    <SelectItem value="JazzCash">JazzCash</SelectItem>
+                    <SelectItem value="Cheque">Cheque</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label className="text-xs">Reference Note / Cheque # (Optional)</Label>
+                <Input placeholder="e.g. Cleared via Cash" value={payNotes} onChange={(e) => setPayNotes(e.target.value)} />
+              </div>
+            </div>
+          )}
+          <DialogFooter className="pt-2">
+            <Button variant="outline" onClick={() => setSelectedPayCustomer(null)}>Cancel</Button>
+            <Button className="bg-emerald-600 hover:bg-emerald-700 text-white" onClick={() => void handleSavePayment()}>
+              Save Udhaar Payment
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Udhaar Payment Thermal Printable Receipt Dialog */}
+      <Dialog open={!!receiptModal} onOpenChange={(v) => !v && setReceiptModal(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Receipt className="h-5 w-5 text-primary" /> Udhaar Payment Receipt
+            </DialogTitle>
+          </DialogHeader>
+
+          {receiptModal && (
+            <div id="udhaar-receipt-print" className="space-y-3 text-sm border p-4 rounded-md bg-white text-black">
+              <div className="text-center">
+                <img src="/logo.png" alt="Mian Ali Traders" className="mx-auto mb-2 h-14 w-auto object-contain" />
+                <p className="font-bold text-base">MIAN ALI TRADERS</p>
+                <p className="text-xs text-muted-foreground">{receiptModal.branchName}</p>
+                <p className="text-[11px] text-muted-foreground">{new Date(receiptModal.date).toLocaleString()}</p>
+              </div>
+
+              <div className="border-t border-b py-2 space-y-1 text-xs">
+                <p><span className="font-semibold">Customer:</span> {receiptModal.customerName}</p>
+                {receiptModal.customerPhone && <p><span className="font-semibold">Phone:</span> {receiptModal.customerPhone}</p>}
+                <p><span className="font-semibold">Payment Method:</span> {receiptModal.paymentMethod}</p>
+                {receiptModal.notes && <p><span className="font-semibold">Note:</span> {receiptModal.notes}</p>}
+              </div>
+
+              <div className="space-y-1 text-xs">
+                <div className="flex justify-between font-bold text-sm text-emerald-700">
+                  <span>Amount Received:</span>
+                  <span>{PKR(receiptModal.amountPaid)}</span>
+                </div>
+                <div className="flex justify-between font-semibold pt-1">
+                  <span>Remaining Udhaar Due:</span>
+                  <span className={receiptModal.remainingDue > 0 ? "text-red-600" : "text-emerald-600"}>
+                    {PKR(receiptModal.remainingDue)}
+                  </span>
+                </div>
+              </div>
+
+              <div className="text-center pt-3 text-[11px] text-muted-foreground border-t">
+                Thank you for your payment!
+              </div>
+            </div>
+          )}
+
+          <DialogFooter className="flex justify-between">
+            <Button variant="outline" onClick={() => setReceiptModal(null)}>Close</Button>
+            <Button onClick={() => window.print()}>
+              <Printer className="mr-2 h-4 w-4" /> Print Receipt
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add Customer / Supplier Modal */}
       <Dialog open={!!open} onOpenChange={(v) => !v && setOpen(null)}>
         <DialogContent className="max-w-md">
           <DialogHeader><DialogTitle>{open === "supplier" ? "Add supplier" : "Add customer"}</DialogTitle></DialogHeader>

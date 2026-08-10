@@ -230,3 +230,24 @@ export function useCashReconciliations(branch: string) {
     },
   });
 }
+
+export function useCustomerPayments(branch: string) {
+  return useQuery({
+    queryKey: ["customer_payments", branch],
+    queryFn: async () => {
+      const q = supabase.from("customer_payments").select("*").order("created_at", { ascending: false });
+      const { data, error } = await scope(q as never, branch);
+      if (error) throw error;
+      return (data ?? []) as unknown as Array<{
+        id: string;
+        customer_id: string;
+        branch_id: string;
+        amount: number;
+        payment_method: string;
+        notes: string | null;
+        created_by: string | null;
+        created_at: string;
+      }>;
+    },
+  });
+}

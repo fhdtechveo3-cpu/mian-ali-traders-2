@@ -630,6 +630,26 @@ grant all on public.price_override_logs to authenticated, service_role;
 grant all on public.cancelled_cart_logs to authenticated, service_role;
 grant all on public.cash_reconciliations to authenticated, service_role;
 
+-- Customer Udhaar Recovery Payments Table
+create table if not exists public.customer_payments (
+  id uuid primary key default gen_random_uuid(),
+  customer_id uuid not null references public.customers(id) on delete cascade,
+  branch_id uuid not null references public.branches(id) on delete cascade,
+  amount numeric(12,2) not null check (amount > 0),
+  payment_method text not null default 'Cash',
+  notes text,
+  created_by uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now()
+);
+
+alter table public.customer_payments enable row level security;
+grant all on public.customer_payments to authenticated;
+grant all on public.customer_payments to service_role;
+drop policy if exists "customer_payments_read" on public.customer_payments;
+create policy "customer_payments_read" on public.customer_payments for select to authenticated using (true);
+drop policy if exists "customer_payments_write" on public.customer_payments;
+create policy "customer_payments_write" on public.customer_payments for all to authenticated using (true);
+
 -- ----------------------------------------------------------------- seed -----
 -- Only the two branches; product/customer data is entered through the app.
 insert into public.branches (id, name, city, phone, address) values
