@@ -2,12 +2,12 @@ import { useMemo, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { PackagePlus, ArrowDownCircle, ArrowUpCircle, Search, History, Check } from "lucide-react";
+import { PackagePlus, ArrowDownCircle, ArrowUpCircle, Search, History, Check, FileText, Printer, Download } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { StatCard } from "@/components/StatCard";
 import { useAuth } from "@/lib/auth";
 import { useMovements, useProducts, useProductBatches, useReturns, useSaleItems, useSuppliers } from "@/lib/queries";
-import { PKR, NUM, daysToExpiry, stockStatus, type Product } from "@/lib/pos";
+import { PKR, NUM, exportRows, daysToExpiry, stockStatus, type Product } from "@/lib/pos";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -62,6 +62,9 @@ function InventoryPage() {
   // Single Product History Modal state
   const [historyProduct, setHistoryProduct] = useState<Product | null>(null);
 
+  // Supplier Order Sheet Modal state
+  const [orderModalOpen, setOrderModalOpen] = useState(false);
+
   const stockValueCost = products.reduce((a, p) => a + Number(p.purchase_price) * Number(p.stock_quantity), 0);
   const stockValueSale = products.reduce((a, p) => a + Number(p.selling_price) * Number(p.stock_quantity), 0);
   const low = products.filter((p) => stockStatus(p) === "low");
@@ -71,6 +74,24 @@ function InventoryPage() {
     const d = daysToExpiry(p.expiry_date);
     return d !== null && d >= 0 && d <= 90;
   });
+
+  const supplierOrderList = useMemo(() => {
+    const reorderItems = products.filter((p) => Number(p.stock_quantity) <= Number(p.low_stock_level));
+    const grouped = new Map<string, Array<{ product: Product; reorderQty: number; estCost: number }>>();
+
+    reorderItems.forEach((p) => {
+      const companyKey = p.company || p.brand || "General Medicines";
+      const targetStock = Math.max(10, Number(p.low_stock_level) * 3);
+      const reorderQty = Math.max(1, targetStock - Math.max(0, Number(p.stock_quantity)));
+      const estCost = reorderQty * Number(p.purchase_price);
+
+      const existing = grouped.get(companyKey) ?? [];
+      existing.push({ product: p, reorderQty, estCost });
+      grouped.set(companyKey, existing);
+    });
+
+    return grouped;
+  }, [products]);
 
   // Autocomplete suggestions for New Stock Entry
   const entrySuggestions = useMemo(() => {
@@ -244,7 +265,15 @@ function InventoryPage() {
   }, [historyProduct, movements, saleItems, returns]);
 
   return (
-    <AppShell title="Inventory" subtitle="Stock levels, live autocomplete search, entry and product ledgers">
+    <AppShell
+      title="Inventory"
+      subtitle="Stock levels, live autocomplete search, entry and product ledgers"
+      actions={
+        <Button size="sm" variant="default" className="bg-primary" onClick={() => setOrderModalOpen(true)}>
+          <FileText className="mr-2 h-4 w-4" /> Generate Supplier Order Sheet
+        </Button>
+      }
+    >
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard label="Stock Value (cost)" value={PKR(stockValueCost)} />
         <StatCard label="Stock Value (retail)" value={PKR(stockValueSale)} tone="success" />
@@ -602,6 +631,103 @@ function InventoryPage() {
               </div>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Supplier Purchase Order Sheet Modal */}
+      <Dialog open={orderModalOpen} onOpenChange={setOrderModalOpen}>
+        <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader className="flex flex-row items-center justify-between border-b pb-3">
+            <DialogTitle className="flex items-center gap-2 text-base">
+              <FileText className="h-5 w-5 text-primary" /> Supplier Purchase Order Sheet (Distributor Reorder)
+            </DialogTitle>
+            <div className="flex gap-2">
+              <Button
+                size="xs"
+                variant="outline"
+                onClick={() => {
+                  const rows: Array<Record<string, unknown>> = [];
+                  supplierOrderList.forEach((items, company) => {
+                    items.forEach((i) => {
+                      rows.push({
+                        Company: company,
+                        Product: i.product.name,
+                        Category: i.product.category || "—",
+                        "Current Stock": Number(i.product.stock_quantity),
+                        "Low Stock Level": Number(i.product.low_stock_level),
+                        "Recommended Order Qty": i.reorderQty,
+                        "Unit Cost (Rs)": Number(i.product.purchase_price),
+                        "Est Cost Total (Rs)": i.estCost,
+                      });
+                    });
+                  });
+                  exportRows(rows, "supplier_purchase_order_sheet");
+                }}
+              >
+                <Download className="mr-1 h-3.5 w-3.5" /> Export Excel
+              </Button>
+              <Button size="xs" onClick={() => window.print()}>
+                <Printer className="mr-1 h-3.5 w-3.5" /> Print Order Sheet
+              </Button>
+            </div>
+          </DialogHeader>
+
+          <div id="supplier-order-print" className="space-y-6 pt-2 text-sm bg-white text-black p-2 rounded">
+            <div className="text-center border-b pb-3">
+              <img src="/logo.png" alt="Mian Ali Traders" className="mx-auto mb-1 h-12 w-auto object-contain" />
+              <p className="font-bold text-base">MIAN ALI TRADERS — SUPPLIER PURCHASE ORDER SHEET</p>
+              <p className="text-xs text-muted-foreground">Generated Date: {new Date().toLocaleString()}</p>
+            </div>
+
+            {Array.from(supplierOrderList.entries()).map(([company, items]) => {
+              const companyTotalEst = items.reduce((sum, i) => sum + i.estCost, 0);
+              return (
+                <div key={company} className="space-y-2 border rounded-md p-3">
+                  <div className="flex items-center justify-between border-b pb-1">
+                    <p className="font-bold text-sm text-primary flex items-center gap-1.5">
+                      🏢 Company / Supplier: {company}
+                    </p>
+                    <Badge variant="outline" className="font-semibold text-xs">
+                      Est. Total: {PKR(companyTotalEst)} ({items.length} items)
+                    </Badge>
+                  </div>
+
+                  <Table className="text-xs">
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Product Name</TableHead>
+                        <TableHead>Category</TableHead>
+                        <TableHead className="text-right">Current Stock</TableHead>
+                        <TableHead className="text-right">Min Level</TableHead>
+                        <TableHead className="text-right font-bold text-emerald-700">Recommended Order Qty</TableHead>
+                        <TableHead className="text-right">Unit Rate</TableHead>
+                        <TableHead className="text-right">Est. Cost</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {items.map((i) => (
+                        <TableRow key={i.product.id}>
+                          <TableCell className="font-medium">{i.product.name}</TableCell>
+                          <TableCell className="text-muted-foreground">{i.product.category || "—"}</TableCell>
+                          <TableCell className="text-right font-bold text-red-600">{NUM(i.product.stock_quantity)}</TableCell>
+                          <TableCell className="text-right text-muted-foreground">{NUM(i.product.low_stock_level)}</TableCell>
+                          <TableCell className="text-right font-bold text-emerald-700 text-sm">+{NUM(i.reorderQty)} {i.product.unit}</TableCell>
+                          <TableCell className="text-right">{PKR(i.product.purchase_price)}</TableCell>
+                          <TableCell className="text-right font-semibold">{PKR(i.estCost)}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              );
+            })}
+
+            {!supplierOrderList.size && (
+              <div className="py-8 text-center text-sm text-emerald-600 font-semibold">
+                🎉 All products have healthy stock levels! No items currently require supplier reordering.
+              </div>
+            )}
+          </div>
         </DialogContent>
       </Dialog>
     </AppShell>

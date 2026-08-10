@@ -179,6 +179,31 @@ function ReportsPage() {
         ),
     },
     {
+      title: "Supplier Purchase Order Sheet (Distributor Reorder)",
+      desc: "Distributor reorder sheet grouped by supplier with recommended quantities and estimated costs.",
+      run: () => {
+        const rows: Array<Record<string, unknown>> = [];
+        products
+          .filter((p) => Number(p.stock_quantity) <= Number(p.low_stock_level) && matchProd(p))
+          .forEach((p) => {
+            const targetStock = Math.max(10, Number(p.low_stock_level) * 3);
+            const reorderQty = Math.max(1, targetStock - Math.max(0, Number(p.stock_quantity)));
+            rows.push({
+              Company: p.company || p.brand || "General Medicines",
+              "Product Name": p.name,
+              Category: p.category || "—",
+              "Current Stock": Number(p.stock_quantity),
+              "Low Stock Level": Number(p.low_stock_level),
+              "Recommended Order Qty": reorderQty,
+              "Unit Cost (Rs)": Number(p.purchase_price),
+              "Est Cost Total (Rs)": reorderQty * Number(p.purchase_price),
+              Branch: branchName(p.branch_id),
+            });
+          });
+        exportRows(rows, "supplier_purchase_order_sheet", format);
+      },
+    },
+    {
       title: "Expiry Report",
       desc: "Expired and near-expiry batches with days remaining.",
       run: () =>
