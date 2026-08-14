@@ -651,6 +651,29 @@ create policy "customer_payments_read" on public.customer_payments for select to
 drop policy if exists "customer_payments_write" on public.customer_payments;
 create policy "customer_payments_write" on public.customer_payments for all to authenticated using (true);
 
+-- Store to Store Stock Transfers Table
+create table if not exists public.stock_transfers (
+  id uuid primary key default gen_random_uuid(),
+  transfer_number text not null,
+  from_branch_id uuid not null references public.branches(id) on delete cascade,
+  to_branch_id uuid not null references public.branches(id) on delete cascade,
+  product_id uuid not null references public.products(id) on delete cascade,
+  product_name text not null,
+  quantity numeric(12,2) not null check (quantity > 0),
+  unit_cost numeric(12,2) not null default 0,
+  total_value numeric(12,2) not null default 0,
+  notes text,
+  created_by uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now()
+);
+
+alter table public.stock_transfers enable row level security;
+grant all on public.stock_transfers to authenticated, service_role;
+drop policy if exists "stock_transfers_read" on public.stock_transfers;
+create policy "stock_transfers_read" on public.stock_transfers for select to authenticated using (true);
+drop policy if exists "stock_transfers_write" on public.stock_transfers;
+create policy "stock_transfers_write" on public.stock_transfers for all to authenticated using (true);
+
 -- ----------------------------------------------------------------- seed -----
 -- Only the two branches; product/customer data is entered through the app.
 insert into public.branches (id, name, city, phone, address) values

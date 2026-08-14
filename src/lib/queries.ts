@@ -251,3 +251,27 @@ export function useCustomerPayments(branch: string) {
     },
   });
 }
+
+export function useStockTransfers() {
+  return useQuery({
+    queryKey: ["stock_transfers"],
+    queryFn: async () => {
+      const { data, error } = await supabase.from("stock_transfers").select("*").order("created_at", { ascending: false });
+      if (error) throw error;
+      return (data ?? []) as Array<{
+        id: string;
+        transfer_number: string;
+        from_branch_id: string;
+        to_branch_id: string;
+        product_id: string;
+        product_name: string;
+        quantity: number;
+        unit_cost: number;
+        total_value: number;
+        notes: string | null;
+        created_by: string | null;
+        created_at: string;
+      }>;
+    },
+  });
+}

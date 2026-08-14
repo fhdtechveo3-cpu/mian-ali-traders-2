@@ -2,11 +2,11 @@ import { useMemo, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { PackagePlus, ArrowDownCircle, ArrowUpCircle, Search, History, Check, FileText, Printer, Download } from "lucide-react";
+import { PackagePlus, ArrowDownCircle, ArrowUpCircle, Search, History, Check, FileText, Printer, Download, ArrowRightLeft } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { StatCard } from "@/components/StatCard";
 import { useAuth } from "@/lib/auth";
-import { useMovements, useProducts, useProductBatches, useReturns, useSaleItems, useSuppliers } from "@/lib/queries";
+import { useMovements, useProducts, useProductBatches, useReturns, useSaleItems, useStockTransfers, useSuppliers } from "@/lib/queries";
 import { PKR, NUM, exportRows, daysToExpiry, stockStatus, type Product } from "@/lib/pos";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -64,6 +64,71 @@ function InventoryPage() {
 
   // Supplier Order Sheet Modal state
   const [orderModalOpen, setOrderModalOpen] = useState(false);
+
+  // Store Transfer states
+  const { data: stockTransfers = [] } = useStockTransfers();
+  const [trfFromBranch, setTrfFromBranch] = useState(branches[0]?.id ?? "");
+  const [trfToBranch, setTrfToBranch] = useState(branches[1]?.id ?? "");
+  const [trfProduct, setTrfProduct] = useState<Product | null>(null);
+  const [trfSearch, setTrfSearch] = useState("");
+  const [trfShowDropdown, setTrfShowDropdown] = useState(false);
+  const [trfQty, setTrfQty] = useState(1);
+  const [trfNotes, setTrfNotes] = useState("");
+  const [trfBusy, setTrfBusy] = useState(false);
+
+  const sourceBranchProducts = useMemo(() => {
+    return products.filter((p) => trfFromBranch === "all" || p.branch_id === trfFromBranch);
+  }, [products, trfFromBranch]);
+
+  const trfSuggestions = useMemo(() => {
+    const q = trfSearch.trim().toLowerCase();
+    if (!q) return sourceBranchProducts.slice(0, 6);
+    return sourceBranchProducts.filter((p) =>
+      [p.name, p.company, p.category, p.barcode].some((f) => (f ?? "").toLowerCase().includes(q)),
+    ).slice(0, 6);
+  }, [sourceBranchProducts, trfSearch]);
+
+  const handleExecuteTransfer = async () => {
+    if (!trfProduct || trfQty <= 0) {
+      toast.error("Select a product and valid transfer quantity");
+      return;
+    }
+    if (trfFromBranch === trfToBranch) {
+      toast.error("Source and target branches must be different");
+      return;
+    }
+    if (Number(trfProduct.stock_quantity) < trfQty) {
+      toast.error(`Insufficient stock in source branch (Available: ${trfProduct.stock_quantity})`);
+      return;
+    }
+
+    setTrfBusy(true);
+    const { error } = await supabase.rpc("process_stock_transfer", {
+      _from_branch_id: trfFromBranch,
+      _to_branch_id: trfToBranch,
+      _product_id: trfProduct.id,
+      _quantity: trfQty,
+      _notes: trfNotes || null,
+    });
+
+    setTrfBusy(false);
+    if (error) {
+      toast.error(error.message);
+      return;
+    }
+
+    const fromName = branches.find((b) => b.id === trfFromBranch)?.name ?? "Source";
+    const toName = branches.find((b) => b.id === trfToBranch)?.name ?? "Target";
+    toast.success(`Transferred ${trfQty} ${trfProduct.unit} of ${trfProduct.name} from ${fromName} to ${toName}`);
+
+    setTrfProduct(null);
+    setTrfSearch("");
+    setTrfQty(1);
+    setTrfNotes("");
+    void qc.invalidateQueries({ queryKey: ["products"] });
+    void qc.invalidateQueries({ queryKey: ["movements"] });
+    void qc.invalidateQueries({ queryKey: ["stock_transfers"] });
+  };
 
   const stockValueCost = products.reduce((a, p) => a + Number(p.purchase_price) * Number(p.stock_quantity), 0);
   const stockValueSale = products.reduce((a, p) => a + Number(p.selling_price) * Number(p.stock_quantity), 0);
@@ -437,13 +502,113 @@ function InventoryPage() {
             <Button variant="outline" onClick={() => void adjust(-1)}><ArrowDownCircle className="mr-2 h-4 w-4" /> Decrease Stock</Button>
           </CardContent>
         </Card>
+
+        {/* Store to Store Stock Transfer Card */}
+        <Card className="lg:col-span-2 border-primary/20 bg-primary/5">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center gap-2">
+              <ArrowRightLeft className="h-5 w-5 text-primary" /> Store to Store Stock Transfer (Multi-Branch)
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="space-y-1.5">
+              <Label className="text-xs">Source Branch (From)</Label>
+              <Select value={trfFromBranch} onValueChange={setTrfFromBranch}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name} ({b.city})</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label className="text-xs">Destination Branch (To)</Label>
+              <Select value={trfToBranch} onValueChange={setTrfToBranch}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name} ({b.city})</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-1.5 sm:col-span-2 relative">
+              <Label className="text-xs">Product to Transfer</Label>
+              <div className="relative">
+                <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Search medicine name in source branch..."
+                  className="pl-9"
+                  value={trfSearch}
+                  onFocus={() => setTrfShowDropdown(true)}
+                  onChange={(e) => {
+                    setTrfSearch(e.target.value);
+                    setTrfProduct(null);
+                    setTrfShowDropdown(true);
+                  }}
+                />
+              </div>
+
+              {trfShowDropdown && !trfProduct && (
+                <div className="absolute z-20 mt-1 max-h-48 w-full overflow-y-auto rounded-md border bg-popover p-1 shadow-md">
+                  {trfSuggestions.map((p) => (
+                    <div
+                      key={p.id}
+                      onClick={() => {
+                        setTrfProduct(p);
+                        setTrfSearch(p.name);
+                        setTrfShowDropdown(false);
+                      }}
+                      className="flex cursor-pointer items-center justify-between rounded p-2 text-xs hover:bg-accent"
+                    >
+                      <div>
+                        <p className="font-medium text-foreground">{p.name}</p>
+                        <p className="text-muted-foreground">{p.company || "General"} · {p.category || "Item"}</p>
+                      </div>
+                      <div className="text-right">
+                        <Badge variant="outline">{NUM(p.stock_quantity)} {p.unit}</Badge>
+                        <p className="text-[10px] text-muted-foreground">{PKR(p.purchase_price)}</p>
+                      </div>
+                    </div>
+                  ))}
+                  {!trfSuggestions.length && <p className="p-3 text-center text-xs text-muted-foreground">No products in source branch.</p>}
+                </div>
+              )}
+
+              {trfProduct && (
+                <div className="mt-1 flex items-center justify-between rounded bg-primary/10 p-2 text-xs text-primary font-medium">
+                  <span>Selected: {trfProduct.name} (Source Stock: {NUM(trfProduct.stock_quantity)} {trfProduct.unit})</span>
+                  <Check className="h-4 w-4" />
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-1.5">
+              <Label className="text-xs">Transfer Quantity</Label>
+              <Input type="number" min={1} value={trfQty} onChange={(e) => setTrfQty(Number(e.target.value) || 1)} />
+            </div>
+
+            <div className="space-y-1.5 sm:col-span-2">
+              <Label className="text-xs">Transfer Note / Reference</Label>
+              <Input placeholder="e.g. Urgent stock transfer to Kasur" value={trfNotes} onChange={(e) => setTrfNotes(e.target.value)} />
+            </div>
+
+            <div className="flex items-end">
+              <Button className="w-full bg-primary" disabled={trfBusy} onClick={() => void handleExecuteTransfer()}>
+                <ArrowRightLeft className="mr-2 h-4 w-4" /> Execute Store Transfer
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
       </div>
 
       <Tabs defaultValue="stock" className="mt-5">
-        <TabsList>
+        <TabsList className="flex flex-wrap gap-1">
           <TabsTrigger value="stock">Current Stock</TabsTrigger>
           <TabsTrigger value="expiry">Expiry Watch</TabsTrigger>
           <TabsTrigger value="movements">Stock Movement Logs</TabsTrigger>
+          <TabsTrigger value="transfers">
+            <ArrowRightLeft className="mr-1.5 h-3.5 w-3.5" /> Inter-Branch Transfers ({stockTransfers.length})
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="stock">
@@ -519,6 +684,73 @@ function InventoryPage() {
               </TableBody>
             </Table>
           </CardContent></Card>
+        <TabsContent value="transfers">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-base">Inter-Branch Stock Transfer Financial Ledger</CardTitle>
+              <Button
+                size="xs"
+                variant="outline"
+                onClick={() =>
+                  exportRows(
+                    stockTransfers.map((t) => ({
+                      "Transfer #": t.transfer_number,
+                      Date: new Date(t.created_at).toLocaleString(),
+                      "From Branch": branches.find((b) => b.id === t.from_branch_id)?.name ?? "—",
+                      "To Branch": branches.find((b) => b.id === t.to_branch_id)?.name ?? "—",
+                      Product: t.product_name,
+                      Quantity: Number(t.quantity),
+                      "Unit Cost (Rs)": Number(t.unit_cost),
+                      "Total Value (Rs)": Number(t.total_value),
+                      Notes: t.notes ?? "—",
+                    })),
+                    "inter_branch_stock_transfers_ledger",
+                  )
+                }
+              >
+                <Download className="mr-1.5 h-3.5 w-3.5" /> Export Ledger
+              </Button>
+            </CardHeader>
+            <CardContent className="overflow-x-auto p-4">
+              <Table className="text-xs">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Transfer #</TableHead>
+                    <TableHead>Date & Time</TableHead>
+                    <TableHead>From Branch</TableHead>
+                    <TableHead>To Branch</TableHead>
+                    <TableHead>Product Name</TableHead>
+                    <TableHead className="text-right">Qty Transferred</TableHead>
+                    <TableHead className="text-right">Unit Rate</TableHead>
+                    <TableHead className="text-right font-bold">Total Transfer Value</TableHead>
+                    <TableHead>Notes</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {stockTransfers.map((t) => (
+                    <TableRow key={t.id}>
+                      <TableCell className="font-semibold text-primary">{t.transfer_number}</TableCell>
+                      <TableCell className="text-muted-foreground">{new Date(t.created_at).toLocaleString()}</TableCell>
+                      <TableCell><Badge variant="outline">{branches.find((b) => b.id === t.from_branch_id)?.name}</Badge></TableCell>
+                      <TableCell><Badge variant="default" className="bg-emerald-600 text-white">{branches.find((b) => b.id === t.to_branch_id)?.name}</Badge></TableCell>
+                      <TableCell className="font-medium">{t.product_name}</TableCell>
+                      <TableCell className="text-right font-bold text-emerald-700">+{NUM(t.quantity)}</TableCell>
+                      <TableCell className="text-right">{PKR(t.unit_cost)}</TableCell>
+                      <TableCell className="text-right font-bold text-foreground">{PKR(t.total_value)}</TableCell>
+                      <TableCell className="text-muted-foreground">{t.notes ?? "—"}</TableCell>
+                    </TableRow>
+                  ))}
+                  {!stockTransfers.length && (
+                    <TableRow>
+                      <TableCell colSpan={9} className="py-8 text-center text-sm text-muted-foreground">
+                        No inter-branch stock transfers recorded yet.
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
         </TabsContent>
       </Tabs>
 
