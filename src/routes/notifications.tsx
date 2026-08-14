@@ -5,7 +5,7 @@ import { AlertTriangle, CalendarClock, PackageX, Wallet, Phone, Calendar, CheckC
 import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
 import { useAuth } from "@/lib/auth";
-import { useProducts, useSales } from "@/lib/queries";
+import { useProducts, useReturns, useSales } from "@/lib/queries";
 import { PKR, NUM, daysToExpiry, stockStatus } from "@/lib/pos";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -33,6 +33,7 @@ function NotificationsPage() {
   const qc = useQueryClient();
   const { data: products = [] } = useProducts(activeBranch);
   const { data: sales = [] } = useSales(activeBranch);
+  const { data: returns = [] } = useReturns(activeBranch);
 
   const [searchTerm, setSearchTerm] = useState("");
   const [callingFilter, setCallingFilter] = useState<"all" | "overdue" | "upcoming">("all");
@@ -43,13 +44,39 @@ function NotificationsPage() {
   const [newDueDate, setNewDueDate] = useState("");
   const [busy, setBusy] = useState(false);
 
+  const refundedBySaleMap = useMemo(() => {
+    const map = new Map<string, number>();
+    returns.forEach((r) => {
+      if (r.sale_id) {
+        const prev = map.get(r.sale_id) || 0;
+        map.set(r.sale_id, prev + Number(r.refund_amount));
+      }
+      if (r.invoice_number) {
+        const prev = map.get(r.invoice_number) || 0;
+        map.set(r.invoice_number, prev + Number(r.refund_amount));
+      }
+    });
+    return map;
+  }, [returns]);
+
   const low = products.filter((p) => stockStatus(p) === "low");
   const out = products.filter((p) => stockStatus(p) === "out");
   const expiring = products.filter((p) => {
     const d = daysToExpiry(p.expiry_date);
     return d !== null && d <= 90;
   });
-  const unpaidSales = useMemo(() => sales.filter((s) => Number(s.remaining_amount) > 0), [sales]);
+
+  const unpaidSales = useMemo(() => {
+    return sales.filter((s) => {
+      const refSum = Math.max(
+        refundedBySaleMap.get(s.id) || 0,
+        refundedBySaleMap.get(s.invoice_number) || 0,
+      );
+      if (refSum >= Number(s.total)) return false;
+      const effRemaining = Math.max(0, Number(s.remaining_amount) - refSum);
+      return effRemaining > 0;
+    });
+  }, [sales, refundedBySaleMap]);
 
   const city = (id: string) => branches.find((b) => b.id === id)?.city ?? "";
 

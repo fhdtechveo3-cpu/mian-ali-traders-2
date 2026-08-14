@@ -63,6 +63,30 @@ function SalesPage() {
   const [editNotes, setEditNotes] = useState("");
   const [busy, setBusy] = useState(false);
 
+  const refundedBySaleMap = useMemo(() => {
+    const map = new Map<string, number>();
+    returns.forEach((r) => {
+      if (r.sale_id) {
+        const prev = map.get(r.sale_id) || 0;
+        map.set(r.sale_id, prev + Number(r.refund_amount));
+      }
+      if (r.invoice_number) {
+        const prev = map.get(r.invoice_number) || 0;
+        map.set(r.invoice_number, prev + Number(r.refund_amount));
+      }
+    });
+    return map;
+  }, [returns]);
+
+  const getEffectiveRemaining = (s: Sale) => {
+    const refSum = Math.max(
+      refundedBySaleMap.get(s.id) || 0,
+      refundedBySaleMap.get(s.invoice_number) || 0,
+    );
+    if (refSum >= Number(s.total)) return 0;
+    return Math.max(0, Number(s.remaining_amount) - refSum);
+  };
+
   const filtered = useMemo(() => {
     const t = term.trim().toLowerCase();
     return sales.filter((s) => {
@@ -71,15 +95,16 @@ function SalesPage() {
       const d = new Date(s.created_at);
       const okFrom = !from || d >= new Date(`${from}T00:00:00`);
       const okTo = !to || d <= new Date(`${to}T23:59:59`);
-      const okUdhaar = filterMode === "all" || Number(s.remaining_amount) > 0;
+      const effRemaining = getEffectiveRemaining(s);
+      const okUdhaar = filterMode === "all" || effRemaining > 0;
       return matchTerm && okFrom && okTo && okUdhaar;
     });
-  }, [sales, term, from, to, filterMode]);
+  }, [sales, term, from, to, filterMode, refundedBySaleMap]);
 
   const handleMarkPaid = async () => {
     if (!payModalSale) return;
     setBusy(true);
-    const dueVal = Number(payModalSale.remaining_amount);
+    const dueVal = getEffectiveRemaining(payModalSale);
 
     const { error: saleErr } = await supabase
       .from("sales")
@@ -146,7 +171,7 @@ function SalesPage() {
   const totalRefunds = filteredReturns.reduce((a, r) => a + Number(r.refund_amount), 0);
   const netRevenue = grossRevenue - totalRefunds;
   const profit = filtered.reduce((a, s) => a + Number(s.profit), 0) - totalRefunds;
-  const due = filtered.reduce((a, s) => a + Number(s.remaining_amount), 0);
+  const due = filtered.reduce((a, s) => a + getEffectiveRemaining(s), 0);
 
   const todayNet = useMemo(() => {
     const now = new Date();
@@ -320,10 +345,11 @@ function SalesPage() {
                 {filtered.map((s) => {
                   const phone = (s as unknown as { customer_phone?: string }).customer_phone;
                   const dueDateVal = (s as unknown as { due_date?: string }).due_date;
-                  const isUdhaar = Number(s.remaining_amount) > 0;
                   const invoiceReturns = returns.filter((r) => r.sale_id === s.id || r.invoice_number === s.invoice_number);
                   const hasReturn = invoiceReturns.length > 0;
                   const refundedSum = invoiceReturns.reduce((sum, r) => sum + Number(r.refund_amount), 0);
+                  const effRemaining = getEffectiveRemaining(s);
+                  const isUdhaar = effRemaining > 0 && !hasReturn;
 
                   return (
                     <TableRow key={s.id} className="cursor-pointer" onClick={() => setOpen(s)}>

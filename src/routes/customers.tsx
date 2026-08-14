@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { Plus, Search, Download, CreditCard, Printer, Receipt, Building2 } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { useAuth } from "@/lib/auth";
-import { useCustomerPayments, useCustomers, useMovements, useSales, useSupplierPayments, useSuppliers } from "@/lib/queries";
+import { useCustomerPayments, useCustomers, useMovements, useReturns, useSales, useSupplierPayments, useSuppliers } from "@/lib/queries";
 import { PKR, exportRows } from "@/lib/pos";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent } from "@/components/ui/card";
@@ -21,10 +21,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 export const Route = createFileRoute("/customers")({
   head: () => ({
     meta: [
-      { title: "Customers & Udhaar Recovery — Mian Ali Traders POS" },
-      { name: "description", content: "Maintain customer contacts, Udhaar balances, payment recoveries and supplier records for both branches." },
-      { property: "og:title", content: "Customers & Udhaar Recovery — Mian Ali Traders POS" },
-      { property: "og:description", content: "Customer purchase history, Udhaar recovery payments and supplier directory." },
+      { title: "Customers & Suppliers — Mian Ali Traders POS" },
+      { name: "description", content: "Manage customer ledgers, suppliers, credit sales and payment receipts." },
+      { property: "og:title", content: "Customers & Suppliers — Mian Ali Traders POS" },
+      { property: "og:description", content: "Customer and supplier accounts directory with debt ledger." },
     ],
   }),
   component: CustomersPage,
@@ -47,6 +47,7 @@ function CustomersPage() {
   const { data: customers = [] } = useCustomers(activeBranch);
   const { data: suppliers = [] } = useSuppliers();
   const { data: sales = [] } = useSales(activeBranch);
+  const { data: returns = [] } = useReturns(activeBranch);
   const { data: customerPayments = [] } = useCustomerPayments(activeBranch);
   const { data: movements = [] } = useMovements("all");
   const { data: supplierPayments = [] } = useSupplierPayments();
@@ -71,15 +72,38 @@ function CustomersPage() {
   const [receiptModal, setReceiptModal] = useState<PaymentReceiptData | null>(null);
   const [supplierVoucherModal, setSupplierVoucherModal] = useState<PaymentReceiptData | null>(null);
 
+  const refundedBySaleMap = useMemo(() => {
+    const map = new Map<string, number>();
+    returns.forEach((r) => {
+      if (r.sale_id) {
+        const prev = map.get(r.sale_id) || 0;
+        map.set(r.sale_id, prev + Number(r.refund_amount));
+      }
+      if (r.invoice_number) {
+        const prev = map.get(r.invoice_number) || 0;
+        map.set(r.invoice_number, prev + Number(r.refund_amount));
+      }
+    });
+    return map;
+  }, [returns]);
+
   const stats = useMemo(() => {
     const m = new Map<string, { spent: number; due: number; count: number; earliestDueDate: string | null; overdueDays: number }>();
     sales.forEach((s) => {
       if (!s.customer_id) return;
       const row = m.get(s.customer_id) ?? { spent: 0, due: 0, count: 0, earliestDueDate: null, overdueDays: 0 };
-      row.spent += Number(s.total);
-      row.due += Number(s.remaining_amount);
+      const refSum = Math.max(
+        refundedBySaleMap.get(s.id) || 0,
+        refundedBySaleMap.get(s.invoice_number) || 0,
+      );
+      const effTotal = Math.max(0, Number(s.total) - refSum);
+      const effRemaining = refSum >= Number(s.total) ? 0 : Math.max(0, Number(s.remaining_amount) - refSum);
+
+      row.spent += effTotal;
+      row.due += effRemaining;
       row.count += 1;
-      if (s.due_date && Number(s.remaining_amount) > 0) {
+
+      if (s.due_date && effRemaining > 0) {
         if (!row.earliestDueDate || new Date(s.due_date) < new Date(row.earliestDueDate)) {
           row.earliestDueDate = s.due_date;
         }
@@ -109,7 +133,7 @@ function CustomersPage() {
     });
 
     return m;
-  }, [sales, customerPayments]);
+  }, [sales, customerPayments, refundedBySaleMap]);
 
   const supplierStats = useMemo(() => {
     const m = new Map<string, { purchasedValue: number; totalPaid: number; payableBalance: number }>();
