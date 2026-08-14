@@ -138,7 +138,6 @@ function PosPage() {
       _paid_amount: paid || total,
       _payment_method: method,
       _notes: notes || null,
-      _due_date: dueDate || null,
       _items: lines.map((l) => ({
         product_id: l.product.id,
         product_name: l.product.name,
@@ -147,6 +146,7 @@ function PosPage() {
         purchase_price: Number(l.product.purchase_price),
       })),
       _customer_phone: finalCustomerPhone,
+      _due_date: dueDate || null,
     };
     const { data, error } = await supabase.rpc("create_sale", args as never);
     setBusy(false);
