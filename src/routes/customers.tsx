@@ -214,6 +214,7 @@ function CustomersPage() {
       amount: payAmount,
       payment_method: payMethod,
       notes: payNotes || null,
+      note: payNotes || null,
       created_by: profile?.id ?? null,
     });
 

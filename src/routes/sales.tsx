@@ -127,6 +127,7 @@ function SalesPage() {
         amount: dueVal,
         payment_method: "Cash",
         notes: `Full clearance of Invoice ${payModalSale.invoice_number}`,
+        note: `Full clearance of Invoice ${payModalSale.invoice_number}`,
       });
     }
 

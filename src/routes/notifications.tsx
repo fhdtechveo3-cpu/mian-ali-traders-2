@@ -171,6 +171,7 @@ function NotificationsPage() {
         amount: dueVal,
         payment_method: "Cash",
         notes: `Cleared invoice ${paySale.invoice_number} via Notifications Calling List`,
+        note: `Cleared invoice ${paySale.invoice_number} via Notifications Calling List`,
       });
     }
 
