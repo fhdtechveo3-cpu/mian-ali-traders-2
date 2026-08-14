@@ -275,3 +275,23 @@ export function useStockTransfers() {
     },
   });
 }
+
+export function useSupplierPayments() {
+  return useQuery({
+    queryKey: ["supplier_payments"],
+    queryFn: async () => {
+      const { data, error } = await supabase.from("supplier_payments").select("*").order("created_at", { ascending: false });
+      if (error) throw error;
+      return (data ?? []) as Array<{
+        id: string;
+        supplier_id: string;
+        branch_id: string | null;
+        amount: number;
+        payment_method: string;
+        notes: string | null;
+        created_by: string | null;
+        created_at: string;
+      }>;
+    },
+  });
+}

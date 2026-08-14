@@ -674,6 +674,25 @@ create policy "stock_transfers_read" on public.stock_transfers for select to aut
 drop policy if exists "stock_transfers_write" on public.stock_transfers;
 create policy "stock_transfers_write" on public.stock_transfers for all to authenticated using (true);
 
+-- Supplier / Vendor Payments Table
+create table if not exists public.supplier_payments (
+  id uuid primary key default gen_random_uuid(),
+  supplier_id uuid not null references public.suppliers(id) on delete cascade,
+  branch_id uuid references public.branches(id) on delete cascade,
+  amount numeric(12,2) not null check (amount > 0),
+  payment_method text not null default 'Cash',
+  notes text,
+  created_by uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now()
+);
+
+alter table public.supplier_payments enable row level security;
+grant all on public.supplier_payments to authenticated, service_role;
+drop policy if exists "supplier_payments_read" on public.supplier_payments;
+create policy "supplier_payments_read" on public.supplier_payments for select to authenticated using (true);
+drop policy if exists "supplier_payments_write" on public.supplier_payments;
+create policy "supplier_payments_write" on public.supplier_payments for all to authenticated using (true);
+
 -- ----------------------------------------------------------------- seed -----
 -- Only the two branches; product/customer data is entered through the app.
 insert into public.branches (id, name, city, phone, address) values

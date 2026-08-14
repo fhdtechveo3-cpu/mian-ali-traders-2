@@ -2,10 +2,10 @@ import { useMemo, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Plus, Search, Download, CreditCard, Printer, Receipt } from "lucide-react";
+import { Plus, Search, Download, CreditCard, Printer, Receipt, Building2 } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { useAuth } from "@/lib/auth";
-import { useCustomerPayments, useCustomers, useSales, useSuppliers } from "@/lib/queries";
+import { useCustomerPayments, useCustomers, useMovements, useSales, useSupplierPayments, useSuppliers } from "@/lib/queries";
 import { PKR, exportRows } from "@/lib/pos";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent } from "@/components/ui/card";
@@ -48,6 +48,8 @@ function CustomersPage() {
   const { data: suppliers = [] } = useSuppliers();
   const { data: sales = [] } = useSales(activeBranch);
   const { data: customerPayments = [] } = useCustomerPayments(activeBranch);
+  const { data: movements = [] } = useMovements("all");
+  const { data: supplierPayments = [] } = useSupplierPayments();
 
   const [term, setTerm] = useState("");
   const [open, setOpen] = useState<"customer" | "supplier" | null>(null);
@@ -59,8 +61,15 @@ function CustomersPage() {
   const [payMethod, setPayMethod] = useState("Cash");
   const [payNotes, setPayNotes] = useState("");
 
-  // Printable Payment Receipt state
+  // Vendor / Supplier Payment Dialog states
+  const [selectedPaySupplier, setSelectedPaySupplier] = useState<(typeof suppliers)[0] | null>(null);
+  const [supplierPayAmount, setSupplierPayAmount] = useState(0);
+  const [supplierPayMethod, setSupplierPayMethod] = useState("Bank Transfer");
+  const [supplierPayNotes, setSupplierPayNotes] = useState("");
+
+  // Printable Payment Receipt & Vendor Voucher states
   const [receiptModal, setReceiptModal] = useState<PaymentReceiptData | null>(null);
+  const [supplierVoucherModal, setSupplierVoucherModal] = useState<PaymentReceiptData | null>(null);
 
   const stats = useMemo(() => {
     const m = new Map<string, { spent: number; due: number; count: number; earliestDueDate: string | null; overdueDays: number }>();
@@ -101,6 +110,34 @@ function CustomersPage() {
 
     return m;
   }, [sales, customerPayments]);
+
+  const supplierStats = useMemo(() => {
+    const m = new Map<string, { purchasedValue: number; totalPaid: number; payableBalance: number }>();
+    suppliers.forEach((s) => {
+      m.set(s.id, { purchasedValue: 0, totalPaid: 0, payableBalance: 0 });
+    });
+
+    movements.forEach((mov) => {
+      if (mov.supplier_id && mov.movement_type === "purchase") {
+        const row = m.get(mov.supplier_id) ?? { purchasedValue: 0, totalPaid: 0, payableBalance: 0 };
+        row.purchasedValue += Number(mov.quantity) * (Number(mov.purchase_price) || 0);
+        m.set(mov.supplier_id, row);
+      }
+    });
+
+    supplierPayments.forEach((sp) => {
+      const row = m.get(sp.supplier_id);
+      if (row) {
+        row.totalPaid += Number(sp.amount);
+      }
+    });
+
+    m.forEach((row) => {
+      row.payableBalance = Math.max(0, row.purchasedValue - row.totalPaid);
+    });
+
+    return m;
+  }, [suppliers, movements, supplierPayments]);
 
   const filtered = customers.filter((c) =>
     !term.trim() || [c.name, c.phone].some((f) => (f ?? "").toLowerCase().includes(term.toLowerCase())),
@@ -180,6 +217,49 @@ function CustomersPage() {
     setPayNotes("");
     void qc.invalidateQueries({ queryKey: ["customer_payments"] });
     void qc.invalidateQueries({ queryKey: ["sales"] });
+  };
+
+  const handleSaveSupplierPayment = async () => {
+    if (!selectedPaySupplier || supplierPayAmount <= 0) {
+      toast.error("Enter a valid supplier payment amount");
+      return;
+    }
+
+    const currentPayable = supplierStats.get(selectedPaySupplier.id)?.payableBalance ?? 0;
+    const targetBranch = activeBranch !== "all" ? activeBranch : (profile?.branch_id ?? branches[0]?.id ?? "");
+
+    const { error } = await supabase.from("supplier_payments").insert({
+      supplier_id: selectedPaySupplier.id,
+      branch_id: targetBranch || null,
+      amount: supplierPayAmount,
+      payment_method: supplierPayMethod,
+      notes: supplierPayNotes || null,
+      created_by: profile?.id ?? null,
+    });
+
+    if (error) {
+      toast.error(error.message);
+      return;
+    }
+
+    toast.success(`Vendor payment of PKR ${supplierPayAmount} paid to ${selectedPaySupplier.name}`);
+
+    const newPayable = Math.max(0, currentPayable - supplierPayAmount);
+    setSupplierVoucherModal({
+      customerName: selectedPaySupplier.name,
+      customerPhone: selectedPaySupplier.phone ?? undefined,
+      amountPaid: supplierPayAmount,
+      remainingDue: newPayable,
+      paymentMethod: supplierPayMethod,
+      date: new Date().toISOString(),
+      branchName: branches.find((b) => b.id === targetBranch)?.name ?? "Mian Ali Traders",
+      notes: supplierPayNotes,
+    });
+
+    setSelectedPaySupplier(null);
+    setSupplierPayAmount(0);
+    setSupplierPayNotes("");
+    void qc.invalidateQueries({ queryKey: ["supplier_payments"] });
   };
 
   return (
@@ -347,20 +427,60 @@ function CustomersPage() {
           </CardContent></Card>
         </TabsContent>
 
-        {/* Suppliers Tab */}
+        {/* Suppliers / Vendor Accounts Ledger Tab */}
         <TabsContent value="suppliers">
           <Card><CardContent className="overflow-x-auto p-4">
             <Table>
-              <TableHeader><TableRow><TableHead>Supplier</TableHead><TableHead>Phone</TableHead><TableHead>City</TableHead></TableRow></TableHeader>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Vendor / Supplier</TableHead>
+                  <TableHead>Phone</TableHead>
+                  <TableHead>City</TableHead>
+                  <TableHead className="text-right">Total Stock Purchased</TableHead>
+                  <TableHead className="text-right">Total Payments Made</TableHead>
+                  <TableHead className="text-right font-bold">Outstanding Payable (Dene Hain)</TableHead>
+                  <TableHead className="text-right">Quick Action</TableHead>
+                </TableRow>
+              </TableHeader>
               <TableBody>
-                {suppliers.map((s) => (
-                  <TableRow key={s.id}>
-                    <TableCell className="font-medium">{s.name}</TableCell>
-                    <TableCell>{s.phone ?? "—"}</TableCell>
-                    <TableCell>{s.city ?? "—"}</TableCell>
-                  </TableRow>
-                ))}
-                {!suppliers.length && <TableRow><TableCell colSpan={3} className="py-8 text-center text-sm text-muted-foreground">No suppliers yet.</TableCell></TableRow>}
+                {suppliers.map((s) => {
+                  const st = supplierStats.get(s.id);
+                  const purchased = st?.purchasedValue ?? 0;
+                  const paidVal = st?.totalPaid ?? 0;
+                  const payable = st?.payableBalance ?? 0;
+
+                  return (
+                    <TableRow key={s.id}>
+                      <TableCell className="font-semibold text-foreground flex items-center gap-2">
+                        <Building2 className="h-4 w-4 text-primary" /> {s.name}
+                      </TableCell>
+                      <TableCell>{s.phone ?? "—"}</TableCell>
+                      <TableCell>{s.city ?? "—"}</TableCell>
+                      <TableCell className="text-right font-medium">{PKR(purchased)}</TableCell>
+                      <TableCell className="text-right font-medium text-emerald-600">{PKR(paidVal)}</TableCell>
+                      <TableCell className="text-right font-bold text-sm">
+                        {payable > 0 ? (
+                          <Badge variant="destructive" className="bg-red-600 text-white font-bold">{PKR(payable)}</Badge>
+                        ) : (
+                          <span className="text-emerald-600 font-semibold">Cleared (Rs 0)</span>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Button
+                          size="xs"
+                          className="bg-primary hover:bg-primary/90 text-white"
+                          onClick={() => {
+                            setSelectedPaySupplier(s);
+                            setSupplierPayAmount(payable > 0 ? payable : 0);
+                          }}
+                        >
+                          <CreditCard className="mr-1 h-3.5 w-3.5" /> Pay Supplier
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+                {!suppliers.length && <TableRow><TableCell colSpan={7} className="py-8 text-center text-sm text-muted-foreground">No suppliers registered yet.</TableCell></TableRow>}
               </TableBody>
             </Table>
           </CardContent></Card>
@@ -476,7 +596,117 @@ function CustomersPage() {
             </Button>
           </DialogFooter>
         </DialogContent>
+      {/* Pay Supplier / Vendor Payment Modal */}
+      <Dialog open={!!selectedPaySupplier} onOpenChange={(v) => !v && setSelectedPaySupplier(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base">
+              <Building2 className="h-5 w-5 text-primary" /> Pay Vendor / Supplier Payment
+            </DialogTitle>
+          </DialogHeader>
+          {selectedPaySupplier && (
+            <div className="space-y-4 pt-2">
+              <div className="rounded-md border bg-muted/30 p-3 space-y-1 text-xs">
+                <p><span className="font-semibold">Vendor / Supplier:</span> {selectedPaySupplier.name}</p>
+                <p><span className="font-semibold">Phone:</span> {selectedPaySupplier.phone || "—"}</p>
+                <p className="text-sm font-bold text-red-600 pt-1">
+                  Outstanding Payable (Dene Hain): {PKR(supplierStats.get(selectedPaySupplier.id)?.payableBalance ?? 0)}
+                </p>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label className="text-xs">Amount Paid to Vendor (PKR) *</Label>
+                <Input
+                  type="number"
+                  min={1}
+                  value={supplierPayAmount}
+                  onChange={(e) => setSupplierPayAmount(Number(e.target.value) || 0)}
+                  autoFocus
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label className="text-xs">Payment Method</Label>
+                <Select value={supplierPayMethod} onValueChange={setSupplierPayMethod}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Bank Transfer">Bank Transfer</SelectItem>
+                    <SelectItem value="Cash">Cash</SelectItem>
+                    <SelectItem value="Cheque">Cheque</SelectItem>
+                    <SelectItem value="EasyPaisa">EasyPaisa</SelectItem>
+                    <SelectItem value="JazzCash">JazzCash</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label className="text-xs">Reference Note / Cheque # (Optional)</Label>
+                <Input placeholder="e.g. Bank Transfer Ref #98765" value={supplierPayNotes} onChange={(e) => setSupplierPayNotes(e.target.value)} />
+              </div>
+            </div>
+          )}
+          <DialogFooter className="pt-2">
+            <Button variant="outline" onClick={() => setSelectedPaySupplier(null)}>Cancel</Button>
+            <Button className="bg-primary text-white" onClick={() => void handleSaveSupplierPayment()}>
+              Save Vendor Payment
+            </Button>
+          </DialogFooter>
+        </DialogContent>
       </Dialog>
+
+      {/* Vendor Payment Voucher Printable Dialog */}
+      <Dialog open={!!supplierVoucherModal} onOpenChange={(v) => !v && setSupplierVoucherModal(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Receipt className="h-5 w-5 text-primary" /> Vendor Payment Voucher
+            </DialogTitle>
+          </DialogHeader>
+
+          {supplierVoucherModal && (
+            <div id="vendor-voucher-print" className="space-y-3 text-sm border p-4 rounded-md bg-white text-black">
+              <div className="text-center">
+                <img src="/logo.png" alt="Mian Ali Traders" className="mx-auto mb-2 h-14 w-auto object-contain" />
+                <p className="font-bold text-base">MIAN ALI TRADERS</p>
+                <p className="text-xs text-muted-foreground">{supplierVoucherModal.branchName} — Vendor Payment Voucher</p>
+                <p className="text-[11px] text-muted-foreground">{new Date(supplierVoucherModal.date).toLocaleString()}</p>
+              </div>
+
+              <div className="border-t border-b py-2 space-y-1 text-xs">
+                <p><span className="font-semibold">Paid To Vendor:</span> {supplierVoucherModal.customerName}</p>
+                {supplierVoucherModal.customerPhone && <p><span className="font-semibold">Phone:</span> {supplierVoucherModal.customerPhone}</p>}
+                <p><span className="font-semibold">Payment Method:</span> {supplierVoucherModal.paymentMethod}</p>
+                {supplierVoucherModal.notes && <p><span className="font-semibold">Note / Ref:</span> {supplierVoucherModal.notes}</p>}
+              </div>
+
+              <div className="space-y-1 text-xs">
+                <div className="flex justify-between font-bold text-sm text-emerald-700">
+                  <span>Amount Paid:</span>
+                  <span>{PKR(supplierVoucherModal.amountPaid)}</span>
+                </div>
+                <div className="flex justify-between font-semibold pt-1">
+                  <span>Remaining Payable Balance:</span>
+                  <span className={supplierVoucherModal.remainingDue > 0 ? "text-red-600" : "text-emerald-600"}>
+                    {PKR(supplierVoucherModal.remainingDue)}
+                  </span>
+                </div>
+              </div>
+
+              <div className="text-center pt-3 text-[11px] text-muted-foreground border-t">
+                Vendor Payment Record Saved.
+              </div>
+            </div>
+          )}
+
+          <DialogFooter className="flex justify-between">
+            <Button variant="outline" onClick={() => setSupplierVoucherModal(null)}>Close</Button>
+            <Button onClick={() => window.print()}>
+              <Printer className="mr-2 h-4 w-4" /> Print Voucher
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </Dialog>
 
       {/* Add Customer / Supplier Modal */}
       <Dialog open={!!open} onOpenChange={(v) => !v && setOpen(null)}>
