@@ -517,6 +517,8 @@ function SalesPage() {
             </div>
           )}
         </DialogContent>
+      </Dialog>
+
       {/* Mark Invoice Paid Dialog */}
       <Dialog open={!!payModalSale} onOpenChange={(v) => !v && setPayModalSale(null)}>
         <DialogContent className="max-w-md">
