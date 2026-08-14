@@ -67,6 +67,7 @@ function PosPage() {
   const [paid, setPaid] = useState(0);
   const [method, setMethod] = useState("Cash");
   const [notes, setNotes] = useState("");
+  const [dueDate, setDueDate] = useState("");
   const [busy, setBusy] = useState(false);
   const [receipt, setReceipt] = useState<Receipt | null>(null);
 
@@ -137,6 +138,7 @@ function PosPage() {
       _paid_amount: paid || total,
       _payment_method: method,
       _notes: notes || null,
+      _due_date: dueDate || null,
       _items: lines.map((l) => ({
         product_id: l.product.id,
         product_name: l.product.name,
@@ -419,6 +421,13 @@ function PosPage() {
                 </Select>
               </div>
             </div>
+
+            {(method === "Credit" || remaining > 0) && (
+              <div className="space-y-1.5 rounded-md border border-amber-500/30 bg-amber-500/5 p-2.5">
+                <Label className="text-xs font-semibold text-amber-700 dark:text-amber-400">Udhaar Payment Due Date (Overdue Alert)</Label>
+                <Input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
+              </div>
+            )}
 
             <div className="space-y-1.5">
               <Label>Invoice notes</Label>

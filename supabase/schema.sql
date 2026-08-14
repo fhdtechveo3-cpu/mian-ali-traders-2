@@ -96,6 +96,7 @@ create table if not exists public.sales (
   remaining_amount numeric(12,2) not null default 0,
   payment_method text not null default 'Cash',
   notes text,
+  due_date date,
   created_by uuid references auth.users(id) on delete set null,
   created_at timestamptz not null default now()
 );

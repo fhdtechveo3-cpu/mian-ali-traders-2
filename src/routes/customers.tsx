@@ -63,14 +63,28 @@ function CustomersPage() {
   const [receiptModal, setReceiptModal] = useState<PaymentReceiptData | null>(null);
 
   const stats = useMemo(() => {
-    const m = new Map<string, { spent: number; due: number; count: number }>();
+    const m = new Map<string, { spent: number; due: number; count: number; earliestDueDate: string | null; overdueDays: number }>();
     sales.forEach((s) => {
       if (!s.customer_id) return;
-      const row = m.get(s.customer_id) ?? { spent: 0, due: 0, count: 0 };
+      const row = m.get(s.customer_id) ?? { spent: 0, due: 0, count: 0, earliestDueDate: null, overdueDays: 0 };
       row.spent += Number(s.total);
       row.due += Number(s.remaining_amount);
       row.count += 1;
+      if (s.due_date && Number(s.remaining_amount) > 0) {
+        if (!row.earliestDueDate || new Date(s.due_date) < new Date(row.earliestDueDate)) {
+          row.earliestDueDate = s.due_date;
+        }
+      }
       m.set(s.customer_id, row);
+    });
+
+    const now = new Date();
+    m.forEach((row) => {
+      if (row.due > 0 && row.earliestDueDate) {
+        const diffTime = now.getTime() - new Date(row.earliestDueDate).getTime();
+        const diffDays = Math.floor(diffTime / (1000 * 3600 * 24));
+        row.overdueDays = diffDays > 0 ? diffDays : 0;
+      }
     });
 
     // Subtract payments received
@@ -78,6 +92,10 @@ function CustomersPage() {
       const row = m.get(p.customer_id);
       if (row) {
         row.due = Math.max(0, row.due - Number(p.amount));
+        if (row.due === 0) {
+          row.overdueDays = 0;
+          row.earliestDueDate = null;
+        }
       }
     });
 
@@ -273,20 +291,35 @@ function CustomersPage() {
                 <TableRow>
                   <TableHead>Customer Name</TableHead>
                   <TableHead>Phone Number</TableHead>
-                  <TableHead>Address</TableHead>
                   <TableHead className="text-right">Pending Udhaar Balance</TableHead>
+                  <TableHead>Due Date & Overdue Alert</TableHead>
                   <TableHead className="text-right">Quick Action</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {udhaarCustomers.map((c) => {
-                  const due = stats.get(c.id)?.due ?? 0;
+                  const st = stats.get(c.id);
+                  const due = st?.due ?? 0;
+                  const isOverdue = (st?.overdueDays ?? 0) > 0;
+
                   return (
                     <TableRow key={c.id}>
                       <TableCell className="font-semibold text-foreground">{c.name}</TableCell>
                       <TableCell>{c.phone ?? "—"}</TableCell>
-                      <TableCell className="text-xs text-muted-foreground">{c.address ?? "—"}</TableCell>
                       <TableCell className="text-right font-bold text-red-600 text-sm">{PKR(due)}</TableCell>
+                      <TableCell>
+                        {isOverdue ? (
+                          <Badge variant="destructive" className="bg-red-600 text-white font-bold">
+                            🔴 OVERDUE! Due: {st?.earliestDueDate} ({st?.overdueDays} Days Overdue)
+                          </Badge>
+                        ) : st?.earliestDueDate ? (
+                          <Badge variant="outline" className="text-xs font-semibold text-amber-700 dark:text-amber-400">
+                            Due Date: {st.earliestDueDate}
+                          </Badge>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">Standard Udhaar</span>
+                        )}
+                      </TableCell>
                       <TableCell className="text-right">
                         <Button
                           size="sm"
