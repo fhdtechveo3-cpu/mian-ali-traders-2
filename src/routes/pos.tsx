@@ -90,9 +90,7 @@ function PosPage() {
   };
 
   const subtotal = lines.reduce((a, l) => a + l.quantity * l.price, 0);
-  // Automatic discount rule: 3% off on bills above Rs 5,000
-  const auto = subtotal > 5000 ? Math.round(subtotal * 0.03) : 0;
-  const totalDiscount = (autoDiscount || auto) + discount;
+  const totalDiscount = discount;
   const total = Math.max(subtotal - totalDiscount, 0);
   const remaining = Math.max(total - paid, 0);
 
@@ -394,8 +392,7 @@ function PosPage() {
 
             <div className="rounded-md border p-3 text-sm">
               <Row label="Subtotal" value={PKR(subtotal)} />
-              <Row label="Automatic discount (3% over Rs 5,000)" value={PKR(auto)} />
-              <Row label="Total discount" value={PKR(totalDiscount)} />
+              <Row label="Discount" value={PKR(totalDiscount)} />
               <div className="my-2 h-px bg-border" />
               <Row label="Grand total" value={PKR(total)} bold />
               <Row label="Remaining" value={PKR(remaining)} />
@@ -403,16 +400,12 @@ function PosPage() {
 
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
-                <Label>Manual discount</Label>
-                <Input type="number" value={discount} onChange={(e) => setDiscount(Number(e.target.value) || 0)} />
-              </div>
-              <div className="space-y-1.5">
-                <Label>Override auto discount</Label>
-                <Input type="number" value={autoDiscount} onChange={(e) => setAutoDiscount(Number(e.target.value) || 0)} />
+                <Label>Discount (Rs)</Label>
+                <Input type="number" min={0} value={discount} onChange={(e) => setDiscount(Number(e.target.value) || 0)} />
               </div>
               <div className="space-y-1.5">
                 <Label>Paid amount</Label>
-                <Input type="number" value={paid} onChange={(e) => setPaid(Number(e.target.value) || 0)} />
+                <Input type="number" min={0} value={paid} onChange={(e) => setPaid(Number(e.target.value) || 0)} />
               </div>
               <div className="space-y-1.5">
                 <Label>Payment method</Label>
