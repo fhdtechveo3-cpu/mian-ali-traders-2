@@ -117,10 +117,21 @@ function PosPage() {
     let finalCustomerName = custName.trim() || "Walk-in Customer";
     let finalCustomerPhone = custPhone.trim() || null;
 
+    const isCreditOrUdhaar =
+      method === "Credit" ||
+      method === "Credit / Udhaar" ||
+      Boolean(dueDate) ||
+      paid < total;
+
     let actualPaid = paid;
-    if (method === "Credit") {
+    let finalMethod = method;
+
+    if (isCreditOrUdhaar) {
       actualPaid = paid;
-    } else if (method === "Cash" && paid === 0) {
+      if (method === "Cash") {
+        finalMethod = "Credit / Udhaar";
+      }
+    } else {
       actualPaid = total;
     }
 
@@ -148,7 +159,7 @@ function PosPage() {
       _customer_name: finalCustomerName,
       _discount: totalDiscount,
       _paid_amount: actualPaid,
-      _payment_method: method,
+      _payment_method: finalMethod,
       _notes: notes || null,
       _items: lines.map((l) => ({
         product_id: l.product.id,
@@ -186,7 +197,7 @@ function PosPage() {
       total,
       paid: actualPaid,
       remaining: remainingDue,
-      method,
+      method: finalMethod,
       dueDate: dueDate || undefined,
       notes,
     });
@@ -427,7 +438,7 @@ function PosPage() {
                 <Select value={method} onValueChange={setMethod}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    {["Cash", "Card", "Easypaisa", "JazzCash", "Bank Transfer", "Credit"].map((m) => (
+                    {["Cash", "Credit / Udhaar", "Card", "Easypaisa", "JazzCash", "Bank Transfer"].map((m) => (
                       <SelectItem key={m} value={m}>{m}</SelectItem>
                     ))}
                   </SelectContent>
