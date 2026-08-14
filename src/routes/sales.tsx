@@ -43,6 +43,16 @@ function SalesPage() {
   const [to, setTo] = useState("");
   const [open, setOpen] = useState<Sale | null>(null);
   
+  // Filter mode: "all" or "udhaar"
+  const [filterMode, setFilterMode] = useState<"all" | "udhaar">("all");
+
+  // Mark Invoice Paid Dialog state
+  const [payModalSale, setPayModalSale] = useState<Sale | null>(null);
+
+  // Reschedule Due Date Dialog state
+  const [rescheduleSale, setRescheduleSale] = useState<Sale | null>(null);
+  const [newDueDate, setNewDueDate] = useState("");
+
   // Edit Invoice Dialog state (Admin only)
   const [editingInvoice, setEditingInvoice] = useState<Sale | null>(null);
   const [editName, setEditName] = useState("");
@@ -61,9 +71,67 @@ function SalesPage() {
       const d = new Date(s.created_at);
       const okFrom = !from || d >= new Date(`${from}T00:00:00`);
       const okTo = !to || d <= new Date(`${to}T23:59:59`);
-      return matchTerm && okFrom && okTo;
+      const okUdhaar = filterMode === "all" || Number(s.remaining_amount) > 0;
+      return matchTerm && okFrom && okTo && okUdhaar;
     });
-  }, [sales, term, from, to]);
+  }, [sales, term, from, to, filterMode]);
+
+  const handleMarkPaid = async () => {
+    if (!payModalSale) return;
+    setBusy(true);
+    const dueVal = Number(payModalSale.remaining_amount);
+
+    const { error: saleErr } = await supabase
+      .from("sales")
+      .update({
+        remaining_amount: 0,
+        paid_amount: Number(payModalSale.total),
+      })
+      .eq("id", payModalSale.id);
+
+    if (saleErr) {
+      setBusy(false);
+      toast.error(saleErr.message);
+      return;
+    }
+
+    if (payModalSale.customer_id && dueVal > 0) {
+      await supabase.from("customer_payments").insert({
+        customer_id: payModalSale.customer_id,
+        branch_id: payModalSale.branch_id,
+        amount: dueVal,
+        payment_method: "Cash",
+        notes: `Full clearance of Invoice ${payModalSale.invoice_number}`,
+      });
+    }
+
+    setBusy(false);
+    toast.success(`Invoice ${payModalSale.invoice_number} marked as FULLY PAID!`);
+    setPayModalSale(null);
+    void qc.invalidateQueries({ queryKey: ["sales"] });
+    void qc.invalidateQueries({ queryKey: ["customer_payments"] });
+  };
+
+  const handleRescheduleDueDate = async () => {
+    if (!rescheduleSale || !newDueDate) return;
+    setBusy(true);
+
+    const { error } = await supabase
+      .from("sales")
+      .update({ due_date: newDueDate })
+      .eq("id", rescheduleSale.id);
+
+    setBusy(false);
+    if (error) {
+      toast.error(error.message);
+      return;
+    }
+
+    toast.success(`Due date for Invoice ${rescheduleSale.invoice_number} updated to ${newDueDate}`);
+    setRescheduleSale(null);
+    setNewDueDate("");
+    void qc.invalidateQueries({ queryKey: ["sales"] });
+  };
 
   const filteredReturns = useMemo(() => {
     return returns.filter((r) => {
@@ -200,6 +268,29 @@ function SalesPage() {
 
       <Card className="mt-5">
         <CardContent className="p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b mb-3">
+            <div className="flex gap-2">
+              <Button
+                size="sm"
+                variant={filterMode === "all" ? "default" : "outline"}
+                onClick={() => setFilterMode("all")}
+              >
+                All Invoices ({sales.length})
+              </Button>
+              <Button
+                size="sm"
+                variant={filterMode === "udhaar" ? "destructive" : "outline"}
+                className={filterMode === "udhaar" ? "bg-red-600 hover:bg-red-700 text-white" : ""}
+                onClick={() => setFilterMode("udhaar")}
+              >
+                🔴 Udhaar / Credit Sales ({sales.filter((s) => Number(s.remaining_amount) > 0).length})
+              </Button>
+            </div>
+            <div className="text-xs text-muted-foreground font-medium">
+              Showing {filtered.length} of {sales.length} invoices
+            </div>
+          </div>
+
           <div className="flex flex-wrap gap-2">
             <div className="relative min-w-[220px] flex-1">
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -220,13 +311,16 @@ function SalesPage() {
                   <TableHead>Branch</TableHead>
                   <TableHead className="text-right">Total</TableHead>
                   <TableHead className="text-right">Due</TableHead>
+                  <TableHead>Due Date</TableHead>
                   <TableHead>Payment</TableHead>
-                  <TableHead />
+                  <TableHead className="text-right">Quick Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {filtered.map((s) => {
                   const phone = (s as unknown as { customer_phone?: string }).customer_phone;
+                  const dueDateVal = (s as unknown as { due_date?: string }).due_date;
+                  const isUdhaar = Number(s.remaining_amount) > 0;
                   const invoiceReturns = returns.filter((r) => r.sale_id === s.id || r.invoice_number === s.invoice_number);
                   const hasReturn = invoiceReturns.length > 0;
                   const refundedSum = invoiceReturns.reduce((sum, r) => sum + Number(r.refund_amount), 0);
@@ -234,17 +328,24 @@ function SalesPage() {
                   return (
                     <TableRow key={s.id} className="cursor-pointer" onClick={() => setOpen(s)}>
                       <TableCell className="font-medium">
-                        <div className="flex items-center gap-1.5">
-                          <span>{s.invoice_number}</span>
-                          {hasReturn && (
-                            <Badge variant="destructive" className="bg-red-600 text-white hover:bg-red-700 px-1.5 py-0 text-[10px]">
-                              RETURNED
+                        <div className="flex flex-col gap-0.5">
+                          <div className="flex items-center gap-1.5">
+                            <span>{s.invoice_number}</span>
+                            {hasReturn && (
+                              <Badge variant="destructive" className="bg-red-600 text-white hover:bg-red-700 px-1.5 py-0 text-[10px]">
+                                RETURNED
+                              </Badge>
+                            )}
+                          </div>
+                          {isUdhaar && (
+                            <Badge variant="destructive" className="w-fit bg-red-600 text-white font-bold text-[9px] px-1 py-0">
+                              UNPAID UDHAAR
                             </Badge>
                           )}
                         </div>
                       </TableCell>
                       <TableCell className="text-xs">{new Date(s.created_at).toLocaleString()}</TableCell>
-                      <TableCell>{s.customer_name || "Walk-in"}</TableCell>
+                      <TableCell className="font-medium">{s.customer_name || "Walk-in"}</TableCell>
                       <TableCell className="text-xs text-muted-foreground">{phone || "—"}</TableCell>
                       <TableCell className="text-xs">{branches.find((b) => b.id === s.branch_id)?.city}</TableCell>
                       <TableCell className="text-right font-medium">
@@ -253,17 +354,57 @@ function SalesPage() {
                           <span className="block text-[10px] text-destructive font-semibold">Ref: -{PKR(refundedSum)}</span>
                         )}
                       </TableCell>
-                      <TableCell className="text-right">{Number(s.remaining_amount) > 0 ? <Badge variant="destructive">{PKR(s.remaining_amount)}</Badge> : "—"}</TableCell>
+                      <TableCell className="text-right">
+                        {isUdhaar ? (
+                          <Badge variant="destructive" className="bg-red-600 text-white font-bold">{PKR(s.remaining_amount)}</Badge>
+                        ) : (
+                          <span className="text-xs text-emerald-600 font-semibold">Paid (Rs 0)</span>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-xs">
+                        {dueDateVal ? (
+                          <Badge variant="outline" className="font-medium text-amber-700 dark:text-amber-400">
+                            {dueDateVal}
+                          </Badge>
+                        ) : (
+                          "—"
+                        )}
+                      </TableCell>
+                      <TableCell><Badge variant="outline">{s.payment_method}</Badge></TableCell>
                       <TableCell className="text-right flex items-center justify-end gap-1">
+                        {isUdhaar && (
+                          <>
+                            <Button
+                              size="xs"
+                              className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setPayModalSale(s);
+                              }}
+                            >
+                              Mark Paid
+                            </Button>
+                            <Button
+                              size="xs"
+                              variant="outline"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setRescheduleSale(s);
+                                setNewDueDate(dueDateVal || "");
+                              }}
+                            >
+                              Reschedule
+                            </Button>
+                          </>
+                        )}
                         <Button size="xs" variant="ghost" onClick={(e) => { e.stopPropagation(); setOpen(s); }}>
-                          <Printer className="mr-1 h-3.5 w-3.5" /> Reprint
+                          <Printer className="mr-1 h-3.5 w-3.5" /> Print
                         </Button>
-                        <Button size="xs" variant="outline">View</Button>
                       </TableCell>
                     </TableRow>
                   );
                 })}
-                {!filtered.length && <TableRow><TableCell colSpan={9} className="py-8 text-center text-sm text-muted-foreground">No invoices found.</TableCell></TableRow>}
+                {!filtered.length && <TableRow><TableCell colSpan={10} className="py-8 text-center text-sm text-muted-foreground">No invoices found.</TableCell></TableRow>}
               </TableBody>
             </Table>
           </div>
@@ -375,6 +516,64 @@ function SalesPage() {
               </DialogFooter>
             </div>
           )}
+        </DialogContent>
+      {/* Mark Invoice Paid Dialog */}
+      <Dialog open={!!payModalSale} onOpenChange={(v) => !v && setPayModalSale(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-emerald-600">
+              Clear Udhaar & Mark Invoice Paid
+            </DialogTitle>
+          </DialogHeader>
+          {payModalSale && (
+            <div className="space-y-4 text-xs pt-2">
+              <div className="rounded border bg-card p-3 space-y-1">
+                <p><span className="font-semibold">Invoice #:</span> {payModalSale.invoice_number}</p>
+                <p><span className="font-semibold">Customer:</span> {payModalSale.customer_name || "Walk-in"}</p>
+                <p className="font-bold text-red-600 text-sm pt-1">
+                  Outstanding Due to Clear: {PKR(payModalSale.remaining_amount)}
+                </p>
+              </div>
+              <p className="text-muted-foreground">
+                Marking this invoice paid will clear the remaining balance of {PKR(payModalSale.remaining_amount)} and log cash received in today's revenue.
+              </p>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPayModalSale(null)}>Cancel</Button>
+            <Button className="bg-emerald-600 hover:bg-emerald-700 text-white" disabled={busy} onClick={() => void handleMarkPaid()}>
+              Confirm Payment Received
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Reschedule Due Date Dialog */}
+      <Dialog open={!!rescheduleSale} onOpenChange={(v) => !v && setRescheduleSale(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Reschedule Promised Udhaar Due Date</DialogTitle>
+          </DialogHeader>
+          {rescheduleSale && (
+            <div className="space-y-4 text-xs pt-2">
+              <div className="rounded border bg-card p-3 space-y-1">
+                <p><span className="font-semibold">Invoice #:</span> {rescheduleSale.invoice_number}</p>
+                <p><span className="font-semibold">Customer:</span> {rescheduleSale.customer_name}</p>
+                <p><span className="font-semibold">Current Due Date:</span> {(rescheduleSale as unknown as { due_date?: string }).due_date || "None"}</p>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label className="text-xs">New Promised Due Date *</Label>
+                <Input type="date" value={newDueDate} onChange={(e) => setNewDueDate(e.target.value)} />
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRescheduleSale(null)}>Cancel</Button>
+            <Button className="bg-primary text-white" disabled={busy || !newDueDate} onClick={() => void handleRescheduleDueDate()}>
+              Update Promised Date
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </AppShell>

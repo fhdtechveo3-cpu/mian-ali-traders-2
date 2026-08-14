@@ -45,6 +45,7 @@ type Receipt = {
   paid: number;
   remaining: number;
   method: string;
+  dueDate?: string;
   notes: string;
 };
 
@@ -116,8 +117,19 @@ function PosPage() {
     let finalCustomerName = custName.trim() || "Walk-in Customer";
     let finalCustomerPhone = custPhone.trim() || null;
 
+    let actualPaid = paid;
+    if (method === "Credit") {
+      actualPaid = paid;
+    } else if (method === "Cash" && paid === 0) {
+      actualPaid = total;
+    }
+
     if (!finalCustomerId && finalCustomerName !== "Walk-in Customer") {
-      const existing = customers.find((c) => c.name.toLowerCase() === finalCustomerName.toLowerCase());
+      const existing = customers.find(
+        (c) =>
+          c.name.toLowerCase() === finalCustomerName.toLowerCase() ||
+          (finalCustomerPhone && c.phone === finalCustomerPhone),
+      );
       if (existing) {
         finalCustomerId = existing.id;
       } else {
@@ -135,7 +147,7 @@ function PosPage() {
       _customer_id: finalCustomerId,
       _customer_name: finalCustomerName,
       _discount: totalDiscount,
-      _paid_amount: paid || total,
+      _paid_amount: actualPaid,
       _payment_method: method,
       _notes: notes || null,
       _items: lines.map((l) => ({
@@ -161,7 +173,7 @@ function PosPage() {
       .eq("id", data as string)
       .maybeSingle();
 
-    const paidNow = paid || total;
+    const remainingDue = Math.max(total - actualPaid, 0);
     setReceipt({
       invoice: (sale as { invoice_number: string } | null)?.invoice_number ?? "—",
       date: (sale as { created_at: string } | null)?.created_at ?? new Date().toISOString(),
@@ -172,9 +184,10 @@ function PosPage() {
       subtotal,
       discount: totalDiscount,
       total,
-      paid: paidNow,
-      remaining: Math.max(total - paidNow, 0),
+      paid: actualPaid,
+      remaining: remainingDue,
       method,
+      dueDate: dueDate || undefined,
       notes,
     });
 
@@ -464,17 +477,24 @@ function ReceiptDialog({ receipt, onClose }: { receipt: Receipt | null; onClose:
         </DialogHeader>
         {receipt && (
           <div id="invoice-print" className="space-y-3 text-sm">
-            <div className="text-center">
-              <img src="/logo.png" alt="Mian Ali Traders" className="mx-auto mb-2 h-14 w-auto object-contain" />
-
+            <div className="text-center space-y-1">
+              <img src="/logo.png" alt="Mian Ali Traders" className="mx-auto mb-1 h-12 w-auto object-contain" />
+              <p className="font-bold text-sm">MIAN ALI TRADERS</p>
               <p className="text-xs text-muted-foreground">{receipt.branch}</p>
-              <p className="text-xs text-muted-foreground">Invoice {receipt.invoice}</p>
+              <p className="text-xs font-medium">Invoice {receipt.invoice}</p>
+              {(receipt.remaining > 0 || receipt.method === "Credit") && (
+                <div className="my-1.5 w-full rounded bg-red-600 px-2 py-1 text-center text-xs font-bold text-white uppercase tracking-wider">
+                  🔴 UNPAID / UDHAAR SALE
+                </div>
+              )}
             </div>
-            <div className="flex justify-between text-xs text-muted-foreground">
+
+            <div className="flex justify-between text-xs text-muted-foreground border-b pb-1">
               <span>{new Date(receipt.date).toLocaleString()}</span>
-              <span>{receipt.customer}{receipt.phone ? ` (${receipt.phone})` : ""}</span>
+              <span className="font-semibold text-foreground">{receipt.customer}{receipt.phone ? ` (${receipt.phone})` : ""}</span>
             </div>
-            <div className="border-t pt-2">
+
+            <div className="py-1 space-y-1 text-xs">
               {receipt.lines.map((l, i) => (
                 <div key={i} className="flex justify-between py-0.5">
                   <span className="min-w-0 flex-1 truncate pr-2">
@@ -484,16 +504,41 @@ function ReceiptDialog({ receipt, onClose }: { receipt: Receipt | null; onClose:
                 </div>
               ))}
             </div>
-            <div className="space-y-0.5 border-t pt-2 text-right">
-              <p>Subtotal: {PKR(receipt.subtotal)}</p>
-              <p>Discount: {PKR(receipt.discount)}</p>
-              <p className="text-base font-semibold">Total: {PKR(receipt.total)}</p>
-              <p className="text-xs text-muted-foreground">
-                Paid {PKR(receipt.paid)} · Due {PKR(receipt.remaining)} · {receipt.method}
-              </p>
-              {receipt.notes && <p className="text-xs text-muted-foreground">{receipt.notes}</p>}
-            </div>
-            <p className="text-center text-xs text-muted-foreground">Thank you for your purchase!</p>
+
+            {receipt.remaining > 0 || receipt.method === "Credit" ? (
+              <div className="space-y-1 border-t pt-2 text-right text-xs">
+                <p>Subtotal: {PKR(receipt.subtotal)}</p>
+                <p>Discount: {PKR(receipt.discount)}</p>
+                <p className="text-base font-bold text-red-600">Grand Total: {PKR(receipt.total)}</p>
+                <p className="font-semibold text-emerald-700">Amount Paid: {PKR(receipt.paid)}</p>
+                <p className="text-sm font-bold text-red-600 bg-red-50 dark:bg-red-950/30 p-1 rounded inline-block">
+                  Total Udhaar Due: {PKR(receipt.remaining)}
+                </p>
+                {receipt.dueDate && (
+                  <p className="font-bold text-amber-700 dark:text-amber-400 pt-0.5">
+                    Promised Payment Due Date: {receipt.dueDate}
+                  </p>
+                )}
+                {receipt.notes && <p className="text-xs text-muted-foreground italic">Note: {receipt.notes}</p>}
+                <p className="text-[11px] text-red-600 font-semibold italic text-center pt-2 border-t mt-2">
+                  Please clear your Udhaar balance on or before the promised due date.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-0.5 border-t pt-2 text-right text-xs">
+                <p>Subtotal: {PKR(receipt.subtotal)}</p>
+                <p>Discount: {PKR(receipt.discount)}</p>
+                <p className="text-base font-semibold">Total: {PKR(receipt.total)}</p>
+                <p className="text-xs text-muted-foreground">
+                  Paid {PKR(receipt.paid)} · Due {PKR(receipt.remaining)} · {receipt.method}
+                </p>
+                {receipt.notes && <p className="text-xs text-muted-foreground">{receipt.notes}</p>}
+                <p className="text-center text-xs text-muted-foreground pt-2 border-t mt-2">
+                  Thank you for your purchase!
+                </p>
+              </div>
+            )}
+
             <div className="no-print grid grid-cols-2 gap-2 pt-1">
               <Button onClick={() => window.print()}>
                 <Printer className="mr-2 h-4 w-4" /> Print
