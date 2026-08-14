@@ -684,6 +684,8 @@ function InventoryPage() {
               </TableBody>
             </Table>
           </CardContent></Card>
+        </TabsContent>
+
         <TabsContent value="transfers">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between pb-2">
