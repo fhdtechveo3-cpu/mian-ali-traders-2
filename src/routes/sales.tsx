@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
 import { StatCard } from "@/components/StatCard";
 import { useAuth } from "@/lib/auth";
-import { useSaleItems, useSales, useReturns } from "@/lib/queries";
+import { useCustomerPayments, useSaleItems, useSales, useReturns } from "@/lib/queries";
 import { PKR, exportRows, type Sale } from "@/lib/pos";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent } from "@/components/ui/card";
@@ -37,6 +37,7 @@ function SalesPage() {
   const { data: sales = [] } = useSales(activeBranch);
   const { data: items = [] } = useSaleItems();
   const { data: returns = [] } = useReturns(activeBranch);
+  const { data: customerPayments = [] } = useCustomerPayments(activeBranch);
   
   const [term, setTerm] = useState("");
   const [from, setFrom] = useState("");
@@ -78,13 +79,52 @@ function SalesPage() {
     return map;
   }, [returns]);
 
+  const customerPaidMap = useMemo(() => {
+    const map = new Map<string, number>();
+    customerPayments.forEach((p) => {
+      if (p.customer_id) {
+        const prev = map.get(p.customer_id) || 0;
+        map.set(p.customer_id, prev + Number(p.amount));
+      }
+    });
+    return map;
+  }, [customerPayments]);
+
+  const reconciledRemainingMap = useMemo(() => {
+    const map = new Map<string, number>();
+    const custPaidRem = new Map(customerPaidMap);
+
+    const sortedSales = [...sales].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+
+    sortedSales.forEach((s) => {
+      const refSum = Math.max(
+        refundedBySaleMap.get(s.id) || 0,
+        refundedBySaleMap.get(s.invoice_number) || 0,
+      );
+      if (refSum >= Number(s.total)) {
+        map.set(s.id, 0);
+        return;
+      }
+
+      let rawDue = Math.max(0, Number(s.remaining_amount) - refSum);
+      if (s.customer_id && rawDue > 0) {
+        const custCredit = custPaidRem.get(s.customer_id) || 0;
+        if (custCredit >= rawDue) {
+          custPaidRem.set(s.customer_id, custCredit - rawDue);
+          rawDue = 0;
+        } else if (custCredit > 0) {
+          rawDue -= custCredit;
+          custPaidRem.set(s.customer_id, 0);
+        }
+      }
+      map.set(s.id, rawDue);
+    });
+
+    return map;
+  }, [sales, refundedBySaleMap, customerPaidMap]);
+
   const getEffectiveRemaining = (s: Sale) => {
-    const refSum = Math.max(
-      refundedBySaleMap.get(s.id) || 0,
-      refundedBySaleMap.get(s.invoice_number) || 0,
-    );
-    if (refSum >= Number(s.total)) return 0;
-    return Math.max(0, Number(s.remaining_amount) - refSum);
+    return reconciledRemainingMap.get(s.id) ?? Math.max(0, Number(s.remaining_amount));
   };
 
   const filtered = useMemo(() => {
@@ -99,36 +139,37 @@ function SalesPage() {
       const okUdhaar = filterMode === "all" || effRemaining > 0;
       return matchTerm && okFrom && okTo && okUdhaar;
     });
-  }, [sales, term, from, to, filterMode, refundedBySaleMap]);
+  }, [sales, term, from, to, filterMode, reconciledRemainingMap]);
 
   const handleMarkPaid = async () => {
     if (!payModalSale) return;
     setBusy(true);
-    const dueVal = getEffectiveRemaining(payModalSale);
 
-    const { error: saleErr } = await supabase
-      .from("sales")
-      .update({
-        remaining_amount: 0,
-        paid_amount: Number(payModalSale.total),
-      })
-      .eq("id", payModalSale.id);
+    const { error: rpcErr } = await supabase.rpc("mark_invoice_paid", {
+      _sale_id: payModalSale.id,
+      _payment_method: "Cash",
+    });
 
-    if (saleErr) {
-      setBusy(false);
-      toast.error(saleErr.message);
-      return;
-    }
+    if (rpcErr) {
+      await supabase
+        .from("sales")
+        .update({
+          remaining_amount: 0,
+          paid_amount: Number(payModalSale.total),
+        })
+        .eq("id", payModalSale.id);
 
-    if (payModalSale.customer_id && dueVal > 0) {
-      await supabase.from("customer_payments").insert({
-        customer_id: payModalSale.customer_id,
-        branch_id: payModalSale.branch_id,
-        amount: dueVal,
-        payment_method: "Cash",
-        notes: `Full clearance of Invoice ${payModalSale.invoice_number}`,
-        note: `Full clearance of Invoice ${payModalSale.invoice_number}`,
-      });
+      const dueVal = getEffectiveRemaining(payModalSale);
+      if (payModalSale.customer_id && dueVal > 0) {
+        await supabase.from("customer_payments").insert({
+          customer_id: payModalSale.customer_id,
+          branch_id: payModalSale.branch_id,
+          amount: dueVal,
+          payment_method: "Cash",
+          notes: `Full clearance of Invoice ${payModalSale.invoice_number}`,
+          note: `Full clearance of Invoice ${payModalSale.invoice_number}`,
+        });
+      }
     }
 
     setBusy(false);
@@ -136,6 +177,7 @@ function SalesPage() {
     setPayModalSale(null);
     void qc.invalidateQueries({ queryKey: ["sales"] });
     void qc.invalidateQueries({ queryKey: ["customer_payments"] });
+    void qc.invalidateQueries({ queryKey: ["customers"] });
   };
 
   const handleRescheduleDueDate = async () => {

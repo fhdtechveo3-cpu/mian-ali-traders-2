@@ -36,7 +36,7 @@ function NotificationsPage() {
   const { data: returns = [] } = useReturns(activeBranch);
 
   const [searchTerm, setSearchTerm] = useState("");
-  const [callingFilter, setCallingFilter] = useState<"all" | "overdue" | "upcoming">("all");
+  const [callingFilter, setCallingFilter] = useState<"all" | "overdue" | "upcoming" | "done">("all");
 
   // Dialog states for Udhaar clearing & rescheduling
   const [paySale, setPaySale] = useState<(typeof sales)[0] | null>(null);
@@ -75,6 +75,20 @@ function NotificationsPage() {
       if (refSum >= Number(s.total)) return false;
       const effRemaining = Math.max(0, Number(s.remaining_amount) - refSum);
       return effRemaining > 0;
+    });
+  }, [sales, refundedBySaleMap]);
+
+  const doneSales = useMemo(() => {
+    return sales.filter((s) => {
+      const isCredit = s.payment_method?.toLowerCase().includes("credit") || Boolean((s as unknown as { due_date?: string }).due_date);
+      if (!isCredit) return false;
+      const refSum = Math.max(
+        refundedBySaleMap.get(s.id) || 0,
+        refundedBySaleMap.get(s.invoice_number) || 0,
+      );
+      if (refSum >= Number(s.total)) return true;
+      const effRemaining = Math.max(0, Number(s.remaining_amount) - refSum);
+      return effRemaining === 0;
     });
   }, [sales, refundedBySaleMap]);
 
@@ -151,35 +165,37 @@ function NotificationsPage() {
   const handleConfirmPay = async () => {
     if (!paySale) return;
     setBusy(true);
-    const dueVal = Number(paySale.remaining_amount);
 
-    const { error } = await supabase
-      .from("sales")
-      .update({ remaining_amount: 0, paid_amount: Number(paySale.total) })
-      .eq("id", paySale.id);
+    const { error: rpcErr } = await supabase.rpc("mark_invoice_paid", {
+      _sale_id: paySale.id,
+      _payment_method: "Cash",
+    });
 
-    if (error) {
-      setBusy(false);
-      toast.error(error.message);
-      return;
-    }
+    if (rpcErr) {
+      const dueVal = Number(paySale.remaining_amount);
+      await supabase
+        .from("sales")
+        .update({ remaining_amount: 0, paid_amount: Number(paySale.total) })
+        .eq("id", paySale.id);
 
-    if (paySale.customer_id && dueVal > 0) {
-      await supabase.from("customer_payments").insert({
-        customer_id: paySale.customer_id,
-        branch_id: paySale.branch_id,
-        amount: dueVal,
-        payment_method: "Cash",
-        notes: `Cleared invoice ${paySale.invoice_number} via Notifications Calling List`,
-        note: `Cleared invoice ${paySale.invoice_number} via Notifications Calling List`,
-      });
+      if (paySale.customer_id && dueVal > 0) {
+        await supabase.from("customer_payments").insert({
+          customer_id: paySale.customer_id,
+          branch_id: paySale.branch_id,
+          amount: dueVal,
+          payment_method: "Cash",
+          notes: `Cleared invoice ${paySale.invoice_number} via Notifications Calling List`,
+          note: `Cleared invoice ${paySale.invoice_number} via Notifications Calling List`,
+        });
+      }
     }
 
     setBusy(false);
-    toast.success(`Cleared invoice ${paySale.invoice_number} (${PKR(dueVal)})`);
+    toast.success(`Cleared invoice ${paySale.invoice_number}!`);
     setPaySale(null);
     void qc.invalidateQueries({ queryKey: ["sales"] });
     void qc.invalidateQueries({ queryKey: ["customer_payments"] });
+    void qc.invalidateQueries({ queryKey: ["customers"] });
   };
 
   const handleConfirmReschedule = async () => {
@@ -270,6 +286,14 @@ function NotificationsPage() {
                   >
                     🗓️ Upcoming Promise (Calling List)
                   </Button>
+                  <Button
+                    size="xs"
+                    variant={callingFilter === "done" ? "default" : "outline"}
+                    className={callingFilter === "done" ? "bg-emerald-600 hover:bg-emerald-700 text-white font-semibold" : ""}
+                    onClick={() => setCallingFilter("done")}
+                  >
+                    🟢 Done / Paid Udhaar History ({doneSales.length})
+                  </Button>
                 </div>
               </div>
             </CardHeader>
@@ -284,7 +308,34 @@ function NotificationsPage() {
                 />
               </div>
 
-              <div className="space-y-3 pt-2">
+              {callingFilter === "done" ? (
+                <div className="space-y-3 pt-2">
+                  {doneSales.length === 0 ? (
+                    <div className="p-8 text-center text-muted-foreground">No completed Udhaar sales found.</div>
+                  ) : (
+                    doneSales.map((s) => (
+                      <div key={s.id} className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-3.5 flex flex-wrap items-center justify-between gap-3">
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-foreground">{s.invoice_number}</span>
+                            <Badge className="bg-emerald-600 text-white font-bold text-[10px]">
+                              🟢 PAID & CLEARED
+                            </Badge>
+                          </div>
+                          <p className="text-xs text-muted-foreground">
+                            Customer: <strong className="text-foreground">{s.customer_name || "Walk-in Customer"}</strong> · Date: {new Date(s.created_at).toLocaleDateString()}
+                          </p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-xs text-muted-foreground">Total Bill Paid</p>
+                          <p className="text-base font-bold text-emerald-600">{PKR(s.total)}</p>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              ) : (
+                <div className="space-y-3 pt-2">
                 {customerUdhaarGroups.map((group, idx) => (
                   <div key={idx} className="rounded-lg border bg-card p-4 shadow-sm space-y-3">
                     <div className="flex flex-wrap items-center justify-between gap-2 border-b pb-2">
@@ -382,6 +433,7 @@ function NotificationsPage() {
                   </div>
                 )}
               </div>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
