@@ -564,87 +564,156 @@ function ReceiptDialog({ receipt, onClose }: { receipt: Receipt | null; onClose:
   }, [receipt]);
 
   return (
-    <Dialog open={!!receipt} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="max-w-[320px]">
-        <DialogHeader className="no-print">
-          <DialogTitle>Sale completed · {receipt?.invoice}</DialogTitle>
-        </DialogHeader>
-        {receipt && (
-          <div id="invoice-print" className="space-y-3 text-sm">
-            <div className="text-center space-y-1">
-              <img src="/logo.png" alt="Mian Ali Traders" className="mx-auto mb-1 h-12 w-auto object-contain" />
-              <p className="font-bold text-sm">MIAN ALI TRADERS</p>
-              <p className="text-xs text-muted-foreground">{receipt.branch}</p>
-              <p className="text-xs font-medium">Invoice {receipt.invoice}</p>
-              {(receipt.remaining > 0 || receipt.method === "Credit") && (
-                <div className="my-1.5 w-full rounded bg-red-600 px-2 py-1 text-center text-xs font-bold text-white uppercase tracking-wider">
-                  🔴 UNPAID / UDHAAR SALE
+    <>
+      <Dialog open={!!receipt} onOpenChange={(v) => !v && onClose()}>
+        <DialogContent className="max-w-[340px] no-print">
+          <DialogHeader>
+            <DialogTitle>Sale completed · {receipt?.invoice}</DialogTitle>
+          </DialogHeader>
+          {receipt && (
+            <div className="space-y-3 text-sm">
+              <div className="text-center space-y-1">
+                <img src="/logo.png" alt="Mian Ali Traders" className="mx-auto mb-1 h-12 w-auto object-contain" />
+                <p className="font-bold text-sm">MIAN ALI TRADERS</p>
+                <p className="text-xs text-muted-foreground">{receipt.branch}</p>
+                <p className="text-xs font-medium">Invoice {receipt.invoice}</p>
+                {(receipt.remaining > 0 || receipt.method === "Credit") && (
+                  <div className="my-1.5 w-full rounded bg-red-600 px-2 py-1 text-center text-xs font-bold text-white uppercase tracking-wider">
+                    🔴 UNPAID / UDHAAR SALE
+                  </div>
+                )}
+              </div>
+
+              <div className="flex justify-between text-xs text-muted-foreground border-b pb-1">
+                <span>{new Date(receipt.date).toLocaleString()}</span>
+                <span className="font-semibold text-foreground">{receipt.customer}{receipt.phone ? ` (${receipt.phone})` : ""}</span>
+              </div>
+
+              <div className="py-1 space-y-1 text-xs">
+                {receipt.lines.map((l, i) => (
+                  <div key={i} className="flex justify-between py-0.5">
+                    <span className="min-w-0 flex-1 truncate pr-2">
+                      {l.name} × {NUM(l.quantity)}
+                    </span>
+                    <span>{PKR(l.quantity * l.price)}</span>
+                  </div>
+                ))}
+              </div>
+
+              {receipt.remaining > 0 || receipt.method === "Credit" ? (
+                <div className="space-y-1 border-t pt-2 text-right text-xs">
+                  <p>Subtotal: {PKR(receipt.subtotal)}</p>
+                  <p>Discount: {PKR(receipt.discount)}</p>
+                  <p className="text-base font-bold text-red-600">Grand Total: {PKR(receipt.total)}</p>
+                  <p className="font-semibold text-emerald-700">Amount Paid: {PKR(receipt.paid)}</p>
+                  <p className="text-sm font-bold text-red-600 bg-red-50 dark:bg-red-950/30 p-1 rounded inline-block">
+                    Total Udhaar Due: {PKR(receipt.remaining)}
+                  </p>
+                  {receipt.dueDate && (
+                    <p className="font-bold text-amber-700 dark:text-amber-400 pt-0.5">
+                      Promised Payment Due Date: {formatDateOnly(receipt.dueDate)}
+                    </p>
+                  )}
+                  {receipt.notes && <p className="text-xs text-muted-foreground italic">Note: {receipt.notes}</p>}
+                  <p className="text-[11px] text-red-600 font-semibold italic text-center pt-2 border-t mt-2">
+                    Please clear your Udhaar balance on or before the promised due date.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-0.5 border-t pt-2 text-right text-xs">
+                  <p>Subtotal: {PKR(receipt.subtotal)}</p>
+                  <p>Discount: {PKR(receipt.discount)}</p>
+                  <p className="text-base font-semibold">Total: {PKR(receipt.total)}</p>
+                  <p className="text-xs text-muted-foreground">
+                    Paid {PKR(receipt.paid)} · Due {PKR(receipt.remaining)} · {receipt.method}
+                  </p>
+                  {receipt.notes && <p className="text-xs text-muted-foreground">{receipt.notes}</p>}
+                  <p className="text-center text-xs text-muted-foreground pt-2 border-t mt-2">
+                    Thank you for your purchase!
+                  </p>
                 </div>
               )}
-            </div>
 
-            <div className="flex justify-between text-xs text-muted-foreground border-b pb-1">
-              <span>{new Date(receipt.date).toLocaleString()}</span>
-              <span className="font-semibold text-foreground">{receipt.customer}{receipt.phone ? ` (${receipt.phone})` : ""}</span>
-            </div>
-
-            <div className="py-1 space-y-1 text-xs">
-              {receipt.lines.map((l, i) => (
-                <div key={i} className="flex justify-between py-0.5">
-                  <span className="min-w-0 flex-1 truncate pr-2">
-                    {l.name} × {NUM(l.quantity)}
-                  </span>
-                  <span>{PKR(l.quantity * l.price)}</span>
-                </div>
-              ))}
-            </div>
-
-            {receipt.remaining > 0 || receipt.method === "Credit" ? (
-              <div className="space-y-1 border-t pt-2 text-right text-xs">
-                <p>Subtotal: {PKR(receipt.subtotal)}</p>
-                <p>Discount: {PKR(receipt.discount)}</p>
-                <p className="text-base font-bold text-red-600">Grand Total: {PKR(receipt.total)}</p>
-                <p className="font-semibold text-emerald-700">Amount Paid: {PKR(receipt.paid)}</p>
-                <p className="text-sm font-bold text-red-600 bg-red-50 dark:bg-red-950/30 p-1 rounded inline-block">
-                  Total Udhaar Due: {PKR(receipt.remaining)}
-                </p>
-                {receipt.dueDate && (
-                  <p className="font-bold text-amber-700 dark:text-amber-400 pt-0.5">
-                    Promised Payment Due Date: {formatDateOnly(receipt.dueDate)}
-                  </p>
-                )}
-                {receipt.notes && <p className="text-xs text-muted-foreground italic">Note: {receipt.notes}</p>}
-                <p className="text-[11px] text-red-600 font-semibold italic text-center pt-2 border-t mt-2">
-                  Please clear your Udhaar balance on or before the promised due date.
-                </p>
+              <div className="no-print grid grid-cols-2 gap-2 pt-1">
+                <Button onClick={() => window.print()}>
+                  <Printer className="mr-2 h-4 w-4" /> Print
+                </Button>
+                <Button variant="outline" onClick={onClose}>
+                  Close
+                </Button>
               </div>
-            ) : (
-              <div className="space-y-0.5 border-t pt-2 text-right text-xs">
-                <p>Subtotal: {PKR(receipt.subtotal)}</p>
-                <p>Discount: {PKR(receipt.discount)}</p>
-                <p className="text-base font-semibold">Total: {PKR(receipt.total)}</p>
-                <p className="text-xs text-muted-foreground">
-                  Paid {PKR(receipt.paid)} · Due {PKR(receipt.remaining)} · {receipt.method}
-                </p>
-                {receipt.notes && <p className="text-xs text-muted-foreground">{receipt.notes}</p>}
-                <p className="text-center text-xs text-muted-foreground pt-2 border-t mt-2">
-                  Thank you for your purchase!
-                </p>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Standalone Thermal Print Container (outside Radix Portal to prevent -translate-x-1/2 offset) */}
+      {receipt && (
+        <div id="invoice-print" className="hidden print:block">
+          <div className="text-center space-y-1">
+            <img src="/logo.png" alt="Mian Ali Traders" className="mx-auto mb-1 h-10 w-auto object-contain" />
+            <p className="font-bold text-sm">MIAN ALI TRADERS</p>
+            <p className="text-xs">{receipt.branch}</p>
+            <p className="text-xs font-medium">Invoice {receipt.invoice}</p>
+            {(receipt.remaining > 0 || receipt.method === "Credit") && (
+              <div className="my-1 w-full rounded bg-black text-white px-2 py-0.5 text-center text-xs font-bold uppercase">
+                🔴 UNPAID / UDHAAR SALE
               </div>
             )}
-
-            <div className="no-print grid grid-cols-2 gap-2 pt-1">
-              <Button onClick={() => window.print()}>
-                <Printer className="mr-2 h-4 w-4" /> Print
-              </Button>
-              <Button variant="outline" onClick={onClose}>
-                Close
-              </Button>
-            </div>
           </div>
-        )}
-      </DialogContent>
-    </Dialog>
+
+          <div className="flex justify-between text-xs border-b pb-1 my-2">
+            <span>{new Date(receipt.date).toLocaleString()}</span>
+            <span className="font-semibold">{receipt.customer}{receipt.phone ? ` (${receipt.phone})` : ""}</span>
+          </div>
+
+          <div className="py-1 space-y-1 text-xs">
+            {receipt.lines.map((l, i) => (
+              <div key={i} className="flex justify-between py-0.5">
+                <span className="min-w-0 flex-1 truncate pr-2">
+                  {l.name} × {NUM(l.quantity)}
+                </span>
+                <span>{PKR(l.quantity * l.price)}</span>
+              </div>
+            ))}
+          </div>
+
+          {receipt.remaining > 0 || receipt.method === "Credit" ? (
+            <div className="space-y-1 border-t pt-2 text-right text-xs">
+              <p>Subtotal: {PKR(receipt.subtotal)}</p>
+              <p>Discount: {PKR(receipt.discount)}</p>
+              <p className="text-sm font-bold">Grand Total: {PKR(receipt.total)}</p>
+              <p className="font-semibold">Amount Paid: {PKR(receipt.paid)}</p>
+              <p className="text-xs font-bold border p-1 rounded inline-block">
+                Total Udhaar Due: {PKR(receipt.remaining)}
+              </p>
+              {receipt.dueDate && (
+                <p className="font-bold pt-0.5">
+                  Promised Payment Due Date: {formatDateOnly(receipt.dueDate)}
+                </p>
+              )}
+              {receipt.notes && <p className="text-xs italic">Note: {receipt.notes}</p>}
+              <p className="text-[10px] font-semibold italic text-center pt-2 border-t mt-2">
+                Please clear your Udhaar balance on or before the promised due date.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-0.5 border-t pt-2 text-right text-xs">
+              <p>Subtotal: {PKR(receipt.subtotal)}</p>
+              <p>Discount: {PKR(receipt.discount)}</p>
+              <p className="text-sm font-semibold">Total: {PKR(receipt.total)}</p>
+              <p className="text-xs">
+                Paid {PKR(receipt.paid)} · Due {PKR(receipt.remaining)} · {receipt.method}
+              </p>
+              {receipt.notes && <p className="text-xs">{receipt.notes}</p>}
+              <p className="text-center text-xs pt-2 border-t mt-2">
+                Thank you for your purchase!
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+    </>
   );
 }
 
