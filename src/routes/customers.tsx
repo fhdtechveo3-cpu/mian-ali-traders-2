@@ -2,11 +2,11 @@ import { useMemo, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Plus, Search, Download, CreditCard, Printer, Receipt, Building2 } from "lucide-react";
+import { Plus, Search, Download, CreditCard, Printer, Receipt, Building2, FileText } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { useAuth } from "@/lib/auth";
-import { useCustomerPayments, useCustomers, useMovements, useReturns, useSales, useSupplierPayments, useSuppliers } from "@/lib/queries";
-import { PKR, exportRows } from "@/lib/pos";
+import { useCustomerPayments, useCustomers, useMovements, useReturns, useSaleItems, useSales, useSupplierPayments, useSuppliers } from "@/lib/queries";
+import { PKR, NUM, exportRows, formatDateOnly } from "@/lib/pos";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -49,6 +49,7 @@ function CustomersPage() {
   const { data: sales = [] } = useSales(activeBranch);
   const { data: returns = [] } = useReturns(activeBranch);
   const { data: customerPayments = [] } = useCustomerPayments(activeBranch);
+  const { data: saleItems = [] } = useSaleItems();
   const { data: movements = [] } = useMovements("all");
   const { data: supplierPayments = [] } = useSupplierPayments();
 
@@ -62,6 +63,9 @@ function CustomersPage() {
   const [payMethod, setPayMethod] = useState("Cash");
   const [payNotes, setPayNotes] = useState("");
 
+  // Statement Modal State
+  const [statementCustomer, setStatementCustomer] = useState<(typeof customers)[0] | null>(null);
+
   // Vendor / Supplier Payment Dialog states
   const [selectedPaySupplier, setSelectedPaySupplier] = useState<(typeof suppliers)[0] | null>(null);
   const [supplierPayAmount, setSupplierPayAmount] = useState(0);
@@ -71,6 +75,66 @@ function CustomersPage() {
   // Printable Payment Receipt & Vendor Voucher states
   const [receiptModal, setReceiptModal] = useState<PaymentReceiptData | null>(null);
   const [supplierVoucherModal, setSupplierVoucherModal] = useState<PaymentReceiptData | null>(null);
+
+  const customerLedgerTimeline = useMemo(() => {
+    if (!statementCustomer) return [];
+    const cId = statementCustomer.id;
+
+    const custSales = sales.filter((s) => s.customer_id === cId);
+    const custPayments = customerPayments.filter((p) => p.customer_id === cId);
+
+    const timeline: Array<{
+      id: string;
+      date: string;
+      type: "sale" | "payment";
+      refNo: string;
+      particulars: string;
+      debit: number;
+      credit: number;
+      runningBalance: number;
+    }> = [];
+
+    custSales.forEach((s) => {
+      const sItems = saleItems.filter((i) => (i as unknown as { sale_id: string }).sale_id === s.id);
+      const itemDesc = sItems.length
+        ? sItems.map((i) => `${i.product_name} (${NUM(i.quantity)} × Rs ${i.price})`).join(", ")
+        : "Credit Purchase";
+
+      timeline.push({
+        id: `sale-${s.id}`,
+        date: s.created_at,
+        type: "sale",
+        refNo: s.invoice_number,
+        particulars: itemDesc,
+        debit: Number(s.total),
+        credit: 0,
+        runningBalance: 0,
+      });
+    });
+
+    custPayments.forEach((p) => {
+      timeline.push({
+        id: `pay-${p.id}`,
+        date: p.created_at,
+        type: "payment",
+        refNo: `PAY-${p.id.slice(0, 8).toUpperCase()}`,
+        particulars: `Payment Recovery (${p.payment_method})${p.notes || p.note ? ` — ${p.notes || p.note}` : ""}`,
+        debit: 0,
+        credit: Number(p.amount),
+        runningBalance: 0,
+      });
+    });
+
+    timeline.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+    let running = 0;
+    timeline.forEach((row) => {
+      running += row.debit - row.credit;
+      row.runningBalance = running;
+    });
+
+    return timeline;
+  }, [statementCustomer, sales, customerPayments, saleItems]);
 
   const refundedBySaleMap = useMemo(() => {
     const map = new Map<string, number>();
@@ -396,7 +460,14 @@ function CustomersPage() {
                           <span className="text-emerald-600 font-semibold">Clean (Rs 0)</span>
                         )}
                       </TableCell>
-                      <TableCell className="text-right">
+                      <TableCell className="text-right flex items-center justify-end gap-1.5">
+                        <Button
+                          size="xs"
+                          variant="outline"
+                          onClick={() => setStatementCustomer(c)}
+                        >
+                          <FileText className="mr-1 h-3.5 w-3.5" /> Statement
+                        </Button>
                         <Button
                           size="xs"
                           variant={isDebt ? "default" : "outline"}
@@ -778,6 +849,114 @@ function CustomersPage() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setOpen(null)}>Cancel</Button>
             <Button onClick={() => void save()}>Save</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      {/* Customer Account Statement & Detailed Ledger Modal */}
+      <Dialog open={!!statementCustomer} onOpenChange={(v) => !v && setStatementCustomer(null)}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center justify-between">
+              <span>Customer Account Statement & Ledger</span>
+              <Button size="xs" variant="outline" onClick={() => window.print()}>
+                <Printer className="mr-1.5 h-3.5 w-3.5" /> Print Statement
+              </Button>
+            </DialogTitle>
+          </DialogHeader>
+
+          {statementCustomer && (
+            <div id="printable-statement" className="space-y-4 py-2">
+              {/* Header */}
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b pb-3">
+                <div>
+                  <h2 className="text-xl font-bold text-foreground">MIAN ALI TRADERS</h2>
+                  <p className="text-xs text-muted-foreground">Medical Store POS · Account Statement</p>
+                </div>
+                <div className="text-right text-xs">
+                  <p className="font-bold text-foreground">{statementCustomer.name}</p>
+                  <p className="text-muted-foreground">{statementCustomer.phone || "No Phone"}</p>
+                  <p className="text-muted-foreground">{statementCustomer.address || "Kasur / Talwandi"}</p>
+                </div>
+              </div>
+
+              {/* Summary Cards */}
+              <div className="grid grid-cols-3 gap-3">
+                <div className="rounded-md border bg-muted/30 p-2.5 text-center">
+                  <p className="text-xs text-muted-foreground">Total Billed Purchases</p>
+                  <p className="text-base font-bold text-foreground">{PKR(stats.get(statementCustomer.id)?.spent ?? 0)}</p>
+                </div>
+                <div className="rounded-md border bg-emerald-500/10 p-2.5 text-center">
+                  <p className="text-xs text-emerald-800 dark:text-emerald-300">Total Payments Deposited</p>
+                  <p className="text-base font-bold text-emerald-600">{PKR(stats.get(statementCustomer.id)?.payments ?? 0)}</p>
+                </div>
+                <div className="rounded-md border bg-card p-2.5 text-center">
+                  <p className="text-xs text-muted-foreground">Current Account Position</p>
+                  <p className="text-base font-bold">
+                    {(stats.get(statementCustomer.id)?.netBalance ?? 0) > 0 ? (
+                      <span className="text-red-600">{PKR(stats.get(statementCustomer.id)?.netBalance)} Udhaar</span>
+                    ) : (stats.get(statementCustomer.id)?.netBalance ?? 0) < 0 ? (
+                      <span className="text-emerald-600">{PKR(Math.abs(stats.get(statementCustomer.id)?.netBalance ?? 0))} Advance</span>
+                    ) : (
+                      <span className="text-muted-foreground">Clean (Rs 0)</span>
+                    )}
+                  </p>
+                </div>
+              </div>
+
+              {/* Ledger Timeline Table */}
+              <div className="rounded-md border overflow-hidden">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-muted/50">
+                      <TableHead>Date</TableHead>
+                      <TableHead>Ref / Invoice #</TableHead>
+                      <TableHead>Particulars & Items Purchased</TableHead>
+                      <TableHead className="text-right">Billed (+ Debit)</TableHead>
+                      <TableHead className="text-right">Paid (- Credit)</TableHead>
+                      <TableHead className="text-right">Running Balance</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {customerLedgerTimeline.map((row) => (
+                      <TableRow key={row.id} className="text-xs">
+                        <TableCell className="font-medium whitespace-nowrap">{formatDateOnly(row.date)}</TableCell>
+                        <TableCell className="font-bold">{row.refNo}</TableCell>
+                        <TableCell className="max-w-xs">{row.particulars}</TableCell>
+                        <TableCell className="text-right font-semibold text-red-600">
+                          {row.debit > 0 ? PKR(row.debit) : "—"}
+                        </TableCell>
+                        <TableCell className="text-right font-semibold text-emerald-600">
+                          {row.credit > 0 ? PKR(row.credit) : "—"}
+                        </TableCell>
+                        <TableCell className="text-right font-bold">
+                          {row.runningBalance > 0 ? (
+                            <span className="text-red-600">{PKR(row.runningBalance)} Due</span>
+                          ) : row.runningBalance < 0 ? (
+                            <span className="text-emerald-600">{PKR(Math.abs(row.runningBalance))} Adv</span>
+                          ) : (
+                            "Rs 0"
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                    {!customerLedgerTimeline.length && (
+                      <TableRow>
+                        <TableCell colSpan={6} className="text-center text-muted-foreground py-6">
+                          No transactions found for this customer.
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setStatementCustomer(null)}>Close</Button>
+            <Button onClick={() => window.print()}>
+              <Printer className="mr-2 h-4 w-4" /> Print / Save PDF
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
