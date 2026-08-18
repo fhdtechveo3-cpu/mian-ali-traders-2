@@ -305,13 +305,19 @@ function InventoryPage() {
     });
 
     prodSales.forEach((s) => {
+      const saleId = (s as unknown as { sale_id?: string }).sale_id;
+      const parentSale = sales.find((x) => x.id === saleId);
+      const custName = parentSale?.customer_name || "Walk-in Customer";
+      const payMethod = parentSale?.payment_method || "Cash";
+      const invNo = parentSale?.invoice_number || "Invoice";
+
       timeline.push({
         id: `sale-${s.id}`,
         date: s.created_at,
         type: "sale",
         qty: -Number(s.quantity),
         price: Number(s.price),
-        ref: "Counter Sale",
+        ref: `${invNo} · ${custName} (${payMethod})`,
       });
     });
 
