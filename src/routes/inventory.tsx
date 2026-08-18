@@ -191,9 +191,17 @@ function InventoryPage() {
     }
     const p = selectedProduct;
     const branchId = p.branch_id;
+
+    const updatePayload: Record<string, unknown> = {
+      stock_quantity: Number(p.stock_quantity) + qty,
+    };
+    if (price > 0) updatePayload.purchase_price = price;
+    if (expiryDate) updatePayload.expiry_date = expiryDate;
+    if (batchNumber.trim()) updatePayload.batch_number = batchNumber.trim();
+
     const { error: e1 } = await supabase
       .from("products")
-      .update({ stock_quantity: Number(p.stock_quantity) + qty, ...(price > 0 ? { purchase_price: price } : {}) })
+      .update(updatePayload)
       .eq("id", p.id);
 
     const { error: e2 } = await supabase.from("stock_movements").insert({
