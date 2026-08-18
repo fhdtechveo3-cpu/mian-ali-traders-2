@@ -96,6 +96,8 @@ function PosPage() {
   const total = Math.max(subtotal - totalDiscount, 0);
   const remaining = Math.max(total - paid, 0);
 
+  const isRegisteredCustomer = customerId !== "walkin" && Boolean(customers.find((c) => c.id === customerId));
+
   const checkout = async () => {
     if (!lines.length) {
       toast.error("Add at least one product");
@@ -111,17 +113,22 @@ function PosPage() {
       return;
     }
 
-    setBusy(true);
-
-    let finalCustomerId = customerId === "walkin" ? null : customerId;
-    let finalCustomerName = custName.trim() || "Walk-in Customer";
-    let finalCustomerPhone = custPhone.trim() || null;
-
     const isCreditOrUdhaar =
       method === "Credit" ||
       method === "Credit / Udhaar" ||
       Boolean(dueDate) ||
       paid < total;
+
+    if (isCreditOrUdhaar && !isRegisteredCustomer) {
+      toast.error("Udhaar sale is blocked for Walk-in Customers. Please select a registered saved customer.");
+      return;
+    }
+
+    setBusy(true);
+
+    let finalCustomerId = customerId === "walkin" ? null : customerId;
+    let finalCustomerName = custName.trim() || "Walk-in Customer";
+    let finalCustomerPhone = custPhone.trim() || null;
 
     let actualPaid = paid;
     let finalMethod = method;
@@ -376,6 +383,10 @@ function PosPage() {
                     if (val === "walkin") {
                       setCustName("Walk-in Customer");
                       setCustPhone("");
+                      if (method === "Credit / Udhaar" || method === "Credit") {
+                        setMethod("Cash");
+                      }
+                      setDueDate("");
                     } else {
                       const c = customers.find((x) => x.id === val);
                       if (c) {
@@ -394,6 +405,13 @@ function PosPage() {
                   </SelectContent>
                 </Select>
               </div>
+
+              {!isRegisteredCustomer && (
+                <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-2.5 text-xs text-amber-800 dark:text-amber-300 flex items-center gap-2">
+                  <Lock className="h-4 w-4 shrink-0 text-amber-600" />
+                  <span><strong>Walk-in Udhaar Blocked:</strong> Udhaar facility is available for <strong>Registered / Saved Customers</strong> only.</span>
+                </div>
+              )}
 
               <div className="grid grid-cols-2 gap-2">
                 <div className="space-y-1.5">
@@ -439,14 +457,20 @@ function PosPage() {
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
                     {["Cash", "Credit / Udhaar", "Card", "Easypaisa", "JazzCash", "Bank Transfer"].map((m) => (
-                      <SelectItem key={m} value={m}>{m}</SelectItem>
+                      <SelectItem
+                        key={m}
+                        value={m}
+                        disabled={(m === "Credit / Udhaar" || m === "Credit") && !isRegisteredCustomer}
+                      >
+                        {m}{(m === "Credit / Udhaar" || m === "Credit") && !isRegisteredCustomer ? " (Saved Only)" : ""}
+                      </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </div>
             </div>
 
-            {(method === "Credit" || method === "Credit / Udhaar" || remaining > 0) && (
+            {isRegisteredCustomer && (method === "Credit" || method === "Credit / Udhaar" || remaining > 0) && (
               <div className="space-y-1.5 rounded-md border border-amber-500/30 bg-amber-500/5 p-2.5">
                 <Label className="text-xs font-semibold text-amber-700 dark:text-amber-400">Udhaar Payment Due Date (Overdue Alert)</Label>
                 <Input type="date" min={new Date().toISOString().split("T")[0]} value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
