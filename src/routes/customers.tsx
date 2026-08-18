@@ -88,10 +88,30 @@ function CustomersPage() {
   }, [returns]);
 
   const stats = useMemo(() => {
-    const m = new Map<string, { spent: number; due: number; count: number; earliestDueDate: string | null; overdueDays: number }>();
+    const m = new Map<
+      string,
+      {
+        spent: number;
+        due: number;
+        payments: number;
+        netBalance: number;
+        count: number;
+        earliestDueDate: string | null;
+        overdueDays: number;
+      }
+    >();
+
     sales.forEach((s) => {
       if (!s.customer_id) return;
-      const row = m.get(s.customer_id) ?? { spent: 0, due: 0, count: 0, earliestDueDate: null, overdueDays: 0 };
+      const row = m.get(s.customer_id) ?? {
+        spent: 0,
+        due: 0,
+        payments: 0,
+        netBalance: 0,
+        count: 0,
+        earliestDueDate: null,
+        overdueDays: 0,
+      };
       const refSum = Math.max(
         refundedBySaleMap.get(s.id) || 0,
         refundedBySaleMap.get(s.invoice_number) || 0,
@@ -111,24 +131,31 @@ function CustomersPage() {
       m.set(s.customer_id, row);
     });
 
+    // Track payments received
+    customerPayments.forEach((p) => {
+      const row = m.get(p.customer_id) ?? {
+        spent: 0,
+        due: 0,
+        payments: 0,
+        netBalance: 0,
+        count: 0,
+        earliestDueDate: null,
+        overdueDays: 0,
+      };
+      row.payments += Number(p.amount);
+      m.set(p.customer_id, row);
+    });
+
     const now = new Date();
     m.forEach((row) => {
-      if (row.due > 0 && row.earliestDueDate) {
+      row.netBalance = row.due - row.payments;
+
+      if (row.netBalance > 0 && row.earliestDueDate) {
         const diffTime = now.getTime() - new Date(row.earliestDueDate).getTime();
         const diffDays = Math.floor(diffTime / (1000 * 3600 * 24));
         row.overdueDays = diffDays > 0 ? diffDays : 0;
-      }
-    });
-
-    // Subtract payments received
-    customerPayments.forEach((p) => {
-      const row = m.get(p.customer_id);
-      if (row) {
-        row.due = Math.max(0, row.due - Number(p.amount));
-        if (row.due === 0) {
-          row.overdueDays = 0;
-          row.earliestDueDate = null;
-        }
+      } else {
+        row.overdueDays = 0;
       }
     });
 
@@ -349,7 +376,10 @@ function CustomersPage() {
               </TableHeader>
               <TableBody>
                 {filtered.map((c) => {
-                  const due = stats.get(c.id)?.due ?? 0;
+                  const netBal = stats.get(c.id)?.netBalance ?? 0;
+                  const isDebt = netBal > 0;
+                  const isAdvance = netBal < 0;
+
                   return (
                     <TableRow key={c.id}>
                       <TableCell className="font-medium">{c.name}</TableCell>
@@ -358,26 +388,26 @@ function CustomersPage() {
                       <TableCell className="text-right">{stats.get(c.id)?.count ?? 0}</TableCell>
                       <TableCell className="text-right font-medium">{PKR(stats.get(c.id)?.spent ?? 0)}</TableCell>
                       <TableCell className="text-right">
-                        {due > 0 ? (
-                          <Badge variant="destructive" className="bg-red-600 text-white font-bold">{PKR(due)}</Badge>
+                        {isDebt ? (
+                          <Badge variant="destructive" className="bg-red-600 text-white font-bold">🔴 {PKR(netBal)} Udhaar</Badge>
+                        ) : isAdvance ? (
+                          <Badge className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold">🟢 {PKR(Math.abs(netBal))} Advance Credit</Badge>
                         ) : (
                           <span className="text-emerald-600 font-semibold">Clean (Rs 0)</span>
                         )}
                       </TableCell>
                       <TableCell className="text-right">
-                        {due > 0 && (
-                          <Button
-                            size="xs"
-                            variant="default"
-                            className="bg-emerald-600 hover:bg-emerald-700 text-white"
-                            onClick={() => {
-                              setSelectedPayCustomer(c);
-                              setPayAmount(due);
-                            }}
-                          >
-                            <CreditCard className="mr-1 h-3.5 w-3.5" /> Receive Udhaar
-                          </Button>
-                        )}
+                        <Button
+                          size="xs"
+                          variant={isDebt ? "default" : "outline"}
+                          className={isDebt ? "bg-emerald-600 hover:bg-emerald-700 text-white" : ""}
+                          onClick={() => {
+                            setSelectedPayCustomer(c);
+                            setPayAmount(isDebt ? netBal : 0);
+                          }}
+                        >
+                          <CreditCard className="mr-1 h-3.5 w-3.5" /> {isDebt ? "Receive Udhaar" : "Add Payment"}
+                        </Button>
                       </TableCell>
                     </TableRow>
                   );
