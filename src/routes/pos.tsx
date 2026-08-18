@@ -210,6 +210,31 @@ function PosPage() {
     });
 
     toast.success("Sale completed");
+
+    // FEFO Batch Deduction: Deduct sold items from the nearest expiring product batch first
+    for (const l of lines) {
+      let remainingToDeduct = Number(l.quantity);
+      const activeProdBatches = batches
+        .filter((b) => b.product_id === l.product.id && Number(b.stock_quantity) > 0)
+        .sort((a, b) => {
+          if (!a.expiry_date) return 1;
+          if (!b.expiry_date) return -1;
+          return new Date(a.expiry_date).getTime() - new Date(b.expiry_date).getTime();
+        });
+
+      for (const b of activeProdBatches) {
+        if (remainingToDeduct <= 0) break;
+        const bQty = Number(b.stock_quantity);
+        const deductFromThisBatch = Math.min(remainingToDeduct, bQty);
+        remainingToDeduct -= deductFromThisBatch;
+
+        void supabase
+          .from("product_batches")
+          .update({ stock_quantity: bQty - deductFromThisBatch })
+          .eq("id", b.id);
+      }
+    }
+
     // Background audit log for price overrides
     lines.forEach((l) => {
       if (Number(l.price) !== Number(l.product.selling_price)) {
@@ -235,6 +260,17 @@ function PosPage() {
     setPaid(0);
     setNotes("");
     void qc.invalidateQueries();
+  };
+
+  const getNearestBatchExpiry = (prodId: string, defaultExpiry: string | null) => {
+    const activeBatches = batches
+      .filter((b) => b.product_id === prodId && Number(b.stock_quantity) > 0)
+      .sort((a, b) => {
+        if (!a.expiry_date) return 1;
+        if (!b.expiry_date) return -1;
+        return new Date(a.expiry_date).getTime() - new Date(b.expiry_date).getTime();
+      });
+    return activeBatches[0]?.expiry_date || defaultExpiry;
   };
 
   const clearCartWithAudit = async () => {
@@ -268,25 +304,37 @@ function PosPage() {
             </div>
 
             <div className="mt-3 grid gap-2 sm:grid-cols-2">
-              {results.map((p) => (
-                <button
-                  key={p.id}
-                  onClick={() => add(p)}
-                  className="rounded-lg border p-3 text-left transition-colors hover:bg-accent disabled:opacity-50"
-                  disabled={Number(p.stock_quantity) <= 0}
-                >
-                  <p className="truncate text-sm font-medium">{p.name}</p>
-                  <p className="truncate text-xs text-muted-foreground">
-                    {p.generic_name || p.company || "—"} · {p.category || "General"}
-                  </p>
-                  <div className="mt-2 flex items-center justify-between text-xs">
-                    <span className="font-semibold">{PKR(p.selling_price)}</span>
-                    <Badge variant={Number(p.stock_quantity) <= 0 ? "destructive" : "secondary"}>
-                      {NUM(p.stock_quantity)} {p.unit}
-                    </Badge>
-                  </div>
-                </button>
-              ))}
+              {results.map((p) => {
+                const nearExpDate = getNearestBatchExpiry(p.id, p.expiry_date);
+                const daysLeft = daysToExpiry(nearExpDate);
+
+                return (
+                  <button
+                    key={p.id}
+                    onClick={() => add(p)}
+                    className="rounded-lg border p-3 text-left transition-colors hover:bg-accent disabled:opacity-50 space-y-1"
+                    disabled={Number(p.stock_quantity) <= 0}
+                  >
+                    <div className="flex items-start justify-between gap-1">
+                      <p className="truncate text-sm font-medium">{p.name}</p>
+                      {daysLeft !== null && daysLeft <= 90 && (
+                        <Badge variant="outline" className="text-[9px] px-1 py-0 border-amber-500 text-amber-700 bg-amber-50 dark:bg-amber-950/30">
+                          ⏳ {formatDateOnly(nearExpDate)}
+                        </Badge>
+                      )}
+                    </div>
+                    <p className="truncate text-xs text-muted-foreground">
+                      {p.generic_name || p.company || "—"} · {p.category || "General"}
+                    </p>
+                    <div className="mt-1 flex items-center justify-between text-xs">
+                      <span className="font-semibold">{PKR(p.selling_price)}</span>
+                      <Badge variant={Number(p.stock_quantity) <= 0 ? "destructive" : "secondary"}>
+                        {NUM(p.stock_quantity)} {p.unit}
+                      </Badge>
+                    </div>
+                  </button>
+                );
+              })}
               {!results.length && <p className="text-sm text-muted-foreground">No products found.</p>}
             </div>
 
