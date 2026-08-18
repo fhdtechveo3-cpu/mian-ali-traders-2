@@ -61,6 +61,111 @@ export const formatDateOnly = (dateStr?: string | null): string => {
   return dateStr;
 };
 
+export function printThermalReceipt(elementId: string) {
+  const elem = document.getElementById(elementId);
+  if (!elem) {
+    window.print();
+    return;
+  }
+
+  let iframe = document.getElementById("thermal-print-iframe") as HTMLIFrameElement | null;
+  if (!iframe) {
+    iframe = document.createElement("iframe");
+    iframe.id = "thermal-print-iframe";
+    iframe.style.position = "fixed";
+    iframe.style.right = "0";
+    iframe.style.bottom = "0";
+    iframe.style.width = "0";
+    iframe.style.height = "0";
+    iframe.style.border = "none";
+    iframe.style.zIndex = "-99999";
+    document.body.appendChild(iframe);
+  }
+
+  const doc = iframe.contentWindow?.document;
+  if (!doc) {
+    window.print();
+    return;
+  }
+
+  const clone = elem.cloneNode(true) as HTMLElement;
+  clone.querySelectorAll(".no-print, button").forEach((el) => el.remove());
+
+  doc.open();
+  doc.write(`
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <title>Receipt Print</title>
+        <style>
+          @page {
+            size: 80mm auto;
+            margin: 0mm;
+          }
+          *, *::before, *::after {
+            box-sizing: border-box;
+          }
+          html, body {
+            margin: 0 !important;
+            padding: 0 !important;
+            width: 80mm !important;
+            background: #ffffff !important;
+            color: #000000 !important;
+            font-family: ui-monospace, "Courier New", Courier, monospace !important;
+          }
+          body {
+            padding: 2mm 3mm !important;
+          }
+          .receipt-container {
+            width: 74mm;
+            margin: 0 auto;
+          }
+          img {
+            max-width: 50mm !important;
+            height: auto !important;
+            display: block;
+            margin: 0 auto 4px auto;
+            filter: grayscale(100%) contrast(140%);
+          }
+          table {
+            width: 100% !important;
+            border-collapse: collapse;
+          }
+          th, td {
+            padding: 2px 0 !important;
+            font-size: 10px !important;
+            vertical-align: top;
+          }
+          .text-center { text-align: center; }
+          .text-right { text-align: right; }
+          .font-bold { font-weight: bold; }
+          .flex { display: flex; justify-content: space-between; }
+          .border-b { border-bottom: 1px dashed #000; }
+          .border-t { border-top: 1px dashed #000; }
+          .no-print { display: none !important; }
+          .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+          .space-y-1 > * + * { margin-top: 0.25rem; }
+          .space-y-3 > * + * { margin-top: 0.75rem; }
+          .text-xs { font-size: 10px; }
+          .text-sm { font-size: 12px; }
+          .text-base { font-size: 14px; }
+        </style>
+      </head>
+      <body>
+        <div class="receipt-container">
+          ${clone.innerHTML}
+        </div>
+      </body>
+    </html>
+  `);
+  doc.close();
+
+  setTimeout(() => {
+    iframe?.contentWindow?.focus();
+    iframe?.contentWindow?.print();
+  }, 250);
+}
+
 export function exportRows(rows: Record<string, unknown>[], fileName: string, format: "xlsx" | "csv" = "xlsx") {
   const ws = XLSX.utils.json_to_sheet(rows.length ? rows : [{ info: "No data" }]);
   const wb = XLSX.utils.book_new();

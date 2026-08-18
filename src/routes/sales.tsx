@@ -7,7 +7,7 @@ import { AppShell } from "@/components/AppShell";
 import { StatCard } from "@/components/StatCard";
 import { useAuth } from "@/lib/auth";
 import { useCustomerPayments, useSaleItems, useSales, useReturns } from "@/lib/queries";
-import { PKR, exportRows, formatDateOnly, type Sale } from "@/lib/pos";
+import { PKR, exportRows, formatDateOnly, printThermalReceipt, type Sale } from "@/lib/pos";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -491,7 +491,7 @@ function SalesPage() {
             </DialogTitle>
           </DialogHeader>
           {open && (
-            <div id="invoice-print" className="space-y-3 text-sm">
+            <div id="sales-invoice-print" className="space-y-3 text-sm">
               <div className="text-center">
                 <img src="/logo.png" alt="Mian Ali Traders" className="mx-auto mb-2 h-14 w-auto object-contain" />
                 <p className="text-xs text-muted-foreground">{branches.find((b) => b.id === open.branch_id)?.name}</p>
@@ -525,7 +525,7 @@ function SalesPage() {
               </div>
 
               <div className="no-print grid grid-cols-2 gap-2 pt-2">
-                <Button variant="outline" onClick={() => window.print()}><Printer className="mr-2 h-4 w-4" /> Print receipt</Button>
+                <Button variant="outline" onClick={() => printThermalReceipt("sales-invoice-print")}><Printer className="mr-2 h-4 w-4" /> Print receipt</Button>
                 {isAdmin && (
                   <Button variant="default" onClick={() => startEditing(open)}>
                     <Pencil className="mr-2 h-4 w-4" /> Edit Invoice

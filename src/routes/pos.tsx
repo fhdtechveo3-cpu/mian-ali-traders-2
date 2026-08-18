@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
 import { useAuth } from "@/lib/auth";
 import { useCustomers, useProducts, useProductBatches } from "@/lib/queries";
-import { PKR, NUM, daysToExpiry, formatDateOnly, type Product } from "@/lib/pos";
+import { PKR, NUM, daysToExpiry, formatDateOnly, printThermalReceipt, type Product } from "@/lib/pos";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -559,15 +559,7 @@ function PosPage() {
 function ReceiptDialog({ receipt, onClose }: { receipt: Receipt | null; onClose: () => void }) {
   useEffect(() => {
     if (!receipt) return;
-    const t = setTimeout(() => window.print(), 400);
-    return () => clearTimeout(t);
-  }, [receipt]);
-
-  return (
-function ReceiptDialog({ receipt, onClose }: { receipt: Receipt | null; onClose: () => void }) {
-  useEffect(() => {
-    if (!receipt) return;
-    const t = setTimeout(() => window.print(), 400);
+    const t = setTimeout(() => printThermalReceipt("invoice-print"), 300);
     return () => clearTimeout(t);
   }, [receipt]);
 
@@ -642,7 +634,7 @@ function ReceiptDialog({ receipt, onClose }: { receipt: Receipt | null; onClose:
             )}
 
             <div className="no-print grid grid-cols-2 gap-2 pt-1">
-              <Button onClick={() => window.print()}>
+              <Button onClick={() => printThermalReceipt("invoice-print")}>
                 <Printer className="mr-2 h-4 w-4" /> Print
               </Button>
               <Button variant="outline" onClick={onClose}>
