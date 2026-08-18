@@ -51,6 +51,16 @@ export const stockStatus = (p: Product) =>
 export const daysToExpiry = (d: string | null) =>
   d ? Math.ceil((new Date(d).getTime() - Date.now()) / 86_400_000) : null;
 
+export const formatDateOnly = (dateStr?: string | null): string => {
+  if (!dateStr) return "—";
+  const parts = dateStr.split("T")[0].split("-");
+  if (parts.length === 3) {
+    const [year, month, day] = parts;
+    return `${day}/${month}/${year}`;
+  }
+  return dateStr;
+};
+
 export function exportRows(rows: Record<string, unknown>[], fileName: string, format: "xlsx" | "csv" = "xlsx") {
   const ws = XLSX.utils.json_to_sheet(rows.length ? rows : [{ info: "No data" }]);
   const wb = XLSX.utils.book_new();

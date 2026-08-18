@@ -7,7 +7,7 @@ import { AppShell } from "@/components/AppShell";
 import { StatCard } from "@/components/StatCard";
 import { useAuth } from "@/lib/auth";
 import { useCustomerPayments, useSaleItems, useSales, useReturns } from "@/lib/queries";
-import { PKR, exportRows, type Sale } from "@/lib/pos";
+import { PKR, exportRows, formatDateOnly, type Sale } from "@/lib/pos";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -433,7 +433,7 @@ function SalesPage() {
                       <TableCell className="text-xs">
                         {dueDateVal ? (
                           <Badge variant="outline" className="font-medium text-amber-700 dark:text-amber-400">
-                            {dueDateVal}
+                            {formatDateOnly(dueDateVal)}
                           </Badge>
                         ) : (
                           "—"

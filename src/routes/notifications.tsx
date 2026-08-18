@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
 import { useAuth } from "@/lib/auth";
 import { useProducts, useReturns, useSales } from "@/lib/queries";
-import { PKR, NUM, daysToExpiry, stockStatus } from "@/lib/pos";
+import { PKR, NUM, daysToExpiry, stockStatus, formatDateOnly } from "@/lib/pos";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -354,7 +354,7 @@ function NotificationsPage() {
                           <span>· {group.invoices.length} Unpaid Invoices</span>
                           {group.earliestDueDate && (
                             <span className="font-medium text-amber-700 dark:text-amber-400">
-                              · Promised Due Date: {group.earliestDueDate}
+                              · Promised Due Date: {formatDateOnly(group.earliestDueDate)}
                             </span>
                           )}
                         </p>
@@ -385,7 +385,7 @@ function NotificationsPage() {
                                   <span className="text-muted-foreground">({new Date(inv.created_at).toLocaleDateString()})</span>
                                   {dueDate ? (
                                     <Badge variant="outline" className="text-[10px] font-semibold text-amber-700 dark:text-amber-400">
-                                      Due: {dueDate}
+                                      Due: {formatDateOnly(dueDate)}
                                     </Badge>
                                   ) : (
                                     <span className="text-[10px] text-muted-foreground">No Date Set</span>

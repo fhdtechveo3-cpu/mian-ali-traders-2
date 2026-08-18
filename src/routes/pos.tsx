@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
 import { useAuth } from "@/lib/auth";
 import { useCustomers, useProducts, useProductBatches } from "@/lib/queries";
-import { PKR, NUM, daysToExpiry, type Product } from "@/lib/pos";
+import { PKR, NUM, daysToExpiry, formatDateOnly, type Product } from "@/lib/pos";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -446,10 +446,10 @@ function PosPage() {
               </div>
             </div>
 
-            {(method === "Credit" || remaining > 0) && (
+            {(method === "Credit" || method === "Credit / Udhaar" || remaining > 0) && (
               <div className="space-y-1.5 rounded-md border border-amber-500/30 bg-amber-500/5 p-2.5">
                 <Label className="text-xs font-semibold text-amber-700 dark:text-amber-400">Udhaar Payment Due Date (Overdue Alert)</Label>
-                <Input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
+                <Input type="date" min={new Date().toISOString().split("T")[0]} value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
               </div>
             )}
 
@@ -527,7 +527,7 @@ function ReceiptDialog({ receipt, onClose }: { receipt: Receipt | null; onClose:
                 </p>
                 {receipt.dueDate && (
                   <p className="font-bold text-amber-700 dark:text-amber-400 pt-0.5">
-                    Promised Payment Due Date: {receipt.dueDate}
+                    Promised Payment Due Date: {formatDateOnly(receipt.dueDate)}
                   </p>
                 )}
                 {receipt.notes && <p className="text-xs text-muted-foreground italic">Note: {receipt.notes}</p>}
