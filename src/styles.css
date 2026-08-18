@@ -158,69 +158,69 @@
 /* Thermal receipt & report printing optimization */
 @media print {
   @page {
-    size: 80mm auto;
+    size: auto;
     margin: 0;
-  }
-
-  *,
-  *::before,
-  *::after {
-    transform: none !important;
-    perspective: none !important;
-    animation: none !important;
-    transition: none !important;
   }
 
   html,
   body {
-    width: 80mm !important;
+    background: #fff !important;
+    color: #000 !important;
     margin: 0 !important;
     padding: 0 !important;
-    background: #fff !important;
-    overflow: visible !important;
+    width: 100% !important;
   }
 
-  /* Hide screen UI completely */
-  body > * {
+  /* Hide screen elements */
+  .no-print,
+  header,
+  nav,
+  aside,
+  button {
     display: none !important;
   }
 
-  /* Show thermal receipt element attached to top left without Radix modal interference */
-  #invoice-print,
-  #invoice-print * {
+  /* Reset Radix overlay backdrop & content container styling for print */
+  [role="dialog"],
+  [data-state="open"],
+  .fixed,
+  .inset-0 {
+    position: static !important;
+    transform: none !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    border: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100% !important;
+  }
+
+  /* Center thermal receipt at top 0 on paper */
+  #invoice-print {
     display: block !important;
     visibility: visible !important;
-    color: #000 !important;
-    background: transparent !important;
-    border-color: #000 !important;
-    box-shadow: none !important;
-    font-family: ui-monospace, "Courier New", monospace !important;
-  }
-
-  #invoice-print flex,
-  #invoice-print .flex {
-    display: flex !important;
-  }
-
-  #invoice-print {
-    position: absolute !important;
-    left: 0 !important;
+    position: fixed !important;
     top: 0 !important;
-    width: 74mm !important;
-    margin: 0 3mm !important;
-    padding: 2mm 0 4mm !important;
+    left: 50% !important;
+    transform: translateX(-50%) !important;
+    width: 76mm !important;
+    max-width: 76mm !important;
+    margin: 0 !important;
+    padding: 2mm 0 !important;
     box-sizing: border-box !important;
+    font-family: ui-monospace, "Courier New", Courier, monospace !important;
     font-size: 11px !important;
     line-height: 1.25 !important;
     background: #fff !important;
+    color: #000 !important;
     z-index: 99999999 !important;
   }
 
   #invoice-print * {
-    overflow: visible !important;
-    text-overflow: clip !important;
-    white-space: normal !important;
-    max-width: 100% !important;
+    visibility: visible !important;
+    color: #000 !important;
+    background: transparent !important;
+    border-color: #000 !important;
   }
 
   #invoice-print img {
@@ -240,44 +240,23 @@
   #invoice-print td {
     padding: 1px 0 !important;
     font-size: 10px !important;
-    height: auto !important;
     vertical-align: top;
   }
 
-  #invoice-print .text-base,
-  #invoice-print .text-lg {
-    font-size: 12px !important;
-  }
-
-  #invoice-print .text-sm,
-  #invoice-print .text-xs {
-    font-size: 10px !important;
-  }
-
-  /* Support for Full Page Reports */
-  #printable-statement,
-  #printable-statement *,
-  #supplier-order-print,
-  #supplier-order-print * {
-    display: block !important;
-    visibility: visible !important;
-  }
-
+  /* Full page reports */
   #printable-statement,
   #supplier-order-print {
-    position: absolute !important;
-    left: 0 !important;
+    display: block !important;
+    visibility: visible !important;
+    position: fixed !important;
     top: 0 !important;
+    left: 0 !important;
     width: 100% !important;
     margin: 0 !important;
     padding: 5mm !important;
     background: #fff !important;
-    z-index: 99999999 !important;
     color: #000 !important;
-  }
-
-  .no-print {
-    display: none !important;
+    z-index: 99999999 !important;
   }
 }
 
