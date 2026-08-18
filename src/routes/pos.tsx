@@ -96,7 +96,10 @@ function PosPage() {
   const total = Math.max(subtotal - totalDiscount, 0);
   const remaining = Math.max(total - paid, 0);
 
-  const isRegisteredCustomer = customerId !== "walkin" && Boolean(customers.find((c) => c.id === customerId));
+  const isWalkIn =
+    (!custName.trim() || custName.trim().toLowerCase() === "walk-in customer") &&
+    customerId === "walkin";
+  const isRegisteredCustomer = !isWalkIn;
 
   const checkout = async () => {
     if (!lines.length) {
@@ -120,7 +123,7 @@ function PosPage() {
       paid < total;
 
     if (isCreditOrUdhaar && !isRegisteredCustomer) {
-      toast.error("Udhaar sale is blocked for Walk-in Customers. Please select a registered saved customer.");
+      toast.error("Udhaar sale is blocked for Walk-in Customers. Please enter customer name or select a saved customer.");
       return;
     }
 
@@ -457,7 +460,7 @@ function PosPage() {
               {!isRegisteredCustomer && (
                 <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-2.5 text-xs text-amber-800 dark:text-amber-300 flex items-center gap-2">
                   <Lock className="h-4 w-4 shrink-0 text-amber-600" />
-                  <span><strong>Walk-in Udhaar Blocked:</strong> Udhaar facility is available for <strong>Registered / Saved Customers</strong> only.</span>
+                  <span><strong>Walk-in Udhaar Blocked:</strong> Enter customer name & details or select a saved customer to enable Udhaar.</span>
                 </div>
               )}
 
@@ -468,7 +471,15 @@ function PosPage() {
                     required
                     placeholder="e.g. Ali Raza"
                     value={custName}
-                    onChange={(e) => setCustName(e.target.value)}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setCustName(val);
+                      if (!val.trim() || val.trim().toLowerCase() === "walk-in customer") {
+                        if (method === "Credit / Udhaar" || method === "Credit") {
+                          setMethod("Cash");
+                        }
+                      }
+                    }}
                   />
                 </div>
                 <div className="space-y-1.5">
