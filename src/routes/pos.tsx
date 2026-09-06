@@ -214,30 +214,6 @@ function PosPage() {
 
     toast.success("Sale completed");
 
-    // FEFO Batch Deduction: Deduct sold items from the nearest expiring product batch first
-    for (const l of lines) {
-      let remainingToDeduct = Number(l.quantity);
-      const activeProdBatches = batches
-        .filter((b) => b.product_id === l.product.id && Number(b.stock_quantity) > 0)
-        .sort((a, b) => {
-          if (!a.expiry_date) return 1;
-          if (!b.expiry_date) return -1;
-          return new Date(a.expiry_date).getTime() - new Date(b.expiry_date).getTime();
-        });
-
-      for (const b of activeProdBatches) {
-        if (remainingToDeduct <= 0) break;
-        const bQty = Number(b.stock_quantity);
-        const deductFromThisBatch = Math.min(remainingToDeduct, bQty);
-        remainingToDeduct -= deductFromThisBatch;
-
-        void supabase
-          .from("product_batches")
-          .update({ stock_quantity: bQty - deductFromThisBatch })
-          .eq("id", b.id);
-      }
-    }
-
     // Background audit log for price overrides
     lines.forEach((l) => {
       if (Number(l.price) !== Number(l.product.selling_price)) {

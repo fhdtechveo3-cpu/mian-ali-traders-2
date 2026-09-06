@@ -277,6 +277,43 @@ function InventoryPage() {
       quantity: dir * adjustQty,
       note: "Manual stock adjustment",
     });
+
+    if (dir === 1) {
+      const prodBatches = batches.filter((b) => b.product_id === p.id);
+      if (prodBatches.length > 0) {
+        const lastBatch = prodBatches[prodBatches.length - 1];
+        await supabase
+          .from("product_batches")
+          .update({ stock_quantity: Number(lastBatch.stock_quantity) + adjustQty })
+          .eq("id", lastBatch.id);
+      } else {
+        await supabase.from("product_batches").insert({
+          product_id: p.id,
+          branch_id: p.branch_id,
+          batch_number: p.batch_number || ("ADJ-" + Math.floor(Math.random() * 90000 + 10000)),
+          expiry_date: p.expiry_date || null,
+          purchase_price: Number(p.purchase_price) || 0,
+          selling_price: Number(p.selling_price) || 0,
+          stock_quantity: adjustQty,
+        });
+      }
+    } else {
+      let rem = adjustQty;
+      const sortedBatches = batches
+        .filter((b) => b.product_id === p.id && Number(b.stock_quantity) > 0)
+        .sort((a, b) => (a.expiry_date || "").localeCompare(b.expiry_date || ""));
+      for (const b of sortedBatches) {
+        if (rem <= 0) break;
+        const bQty = Number(b.stock_quantity);
+        const dec = Math.min(rem, bQty);
+        rem -= dec;
+        await supabase
+          .from("product_batches")
+          .update({ stock_quantity: bQty - dec })
+          .eq("id", b.id);
+      }
+    }
+
     toast.success(`Stock adjusted for ${p.name}`);
     setSelectedAdjustProduct(null);
     setSearchAdjustTerm("");

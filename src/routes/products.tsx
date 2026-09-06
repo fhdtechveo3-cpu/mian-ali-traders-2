@@ -208,13 +208,30 @@ function ProductsPage() {
         toast.error("Excel import failed: no valid product rows found");
         return;
       }
-      const { error } = await supabase.from("products").insert(mapped);
+      const { data: insertedProds, error } = await supabase.from("products").insert(mapped).select();
       if (error) {
         toast.error(`Import failed: ${error.message}`);
         return;
       }
+      if (insertedProds && insertedProds.length > 0) {
+        const batchRecords = insertedProds
+          .filter((p) => Number(p.stock_quantity) > 0)
+          .map((p) => ({
+            product_id: p.id,
+            branch_id: p.branch_id,
+            batch_number: p.batch_number || ("B-" + Math.floor(Math.random() * 90000 + 10000)),
+            expiry_date: p.expiry_date || null,
+            purchase_price: Number(p.purchase_price) || 0,
+            selling_price: Number(p.selling_price) || 0,
+            stock_quantity: Number(p.stock_quantity),
+          }));
+        if (batchRecords.length > 0) {
+          await supabase.from("product_batches").insert(batchRecords);
+        }
+      }
       toast.success(`${mapped.length} products imported`);
       void qc.invalidateQueries({ queryKey: ["products"] });
+      void qc.invalidateQueries({ queryKey: ["product_batches"] });
     } catch {
       toast.error("Excel import failed — please check the file format");
     }
