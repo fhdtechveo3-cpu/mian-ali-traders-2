@@ -438,12 +438,12 @@ function InventoryPage() {
               <Input type="date" value={expiryDate} onChange={(e) => setExpiryDate(e.target.value)} />
             </div>
             <div className="space-y-1.5">
-              <Label className="text-xs">Supplier</Label>
+              <Label className="text-xs">Party / Supplier</Label>
               <Select value={supplierId} onValueChange={setSupplierId}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectTrigger><SelectValue placeholder="Select Party / Supplier" /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="none">No supplier</SelectItem>
-                  {suppliers.map((s) => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
+                  <SelectItem value="none">No supplier / Direct</SelectItem>
+                  {suppliers.map((s) => <SelectItem key={s.id} value={s.id}>{s.name}{s.city ? ` (${s.city})` : ""}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>

@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Plus, Search, Download, CreditCard, Printer, Receipt, Building2, FileText } from "lucide-react";
+import { Plus, Search, Download, CreditCard, Printer, Receipt, Building2, FileText, Pencil, Users } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { useAuth } from "@/lib/auth";
 import { useCustomerPayments, useCustomers, useMovements, useProducts, useReturns, useSaleItems, useSales, useSupplierPayments, useSuppliers } from "@/lib/queries";
@@ -21,14 +21,23 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 export const Route = createFileRoute("/customers")({
   head: () => ({
     meta: [
-      { title: "Customers & Suppliers — Mian Ali Traders POS" },
-      { name: "description", content: "Manage customer ledgers, suppliers, credit sales and payment receipts." },
-      { property: "og:title", content: "Customers & Suppliers — Mian Ali Traders POS" },
-      { property: "og:description", content: "Customer and supplier accounts directory with debt ledger." },
+      { title: "Parties & Khata — Mian Ali Traders POS" },
+      { name: "description", content: "Unified trading parties directory, credit sales, stock purchases and dual-sided debt ledger." },
+      { property: "og:title", content: "Parties & Khata — Mian Ali Traders POS" },
+      { property: "og:description", content: "Unified customer & supplier parties directory with 360-degree khata ledger." },
     ],
   }),
-  component: CustomersPage,
+  component: PartiesAndKhataPage,
 });
+
+export type Party = {
+  id: string;
+  name: string;
+  phone: string | null;
+  address: string | null;
+  city: string | null;
+  branch_id?: string | null;
+};
 
 type PaymentReceiptData = {
   customerName: string;
@@ -41,7 +50,7 @@ type PaymentReceiptData = {
   notes?: string;
 };
 
-function CustomersPage() {
+function PartiesAndKhataPage() {
   const { activeBranch, profile, branches } = useAuth();
   const qc = useQueryClient();
   const { data: customers = [] } = useCustomers(activeBranch);
@@ -55,21 +64,24 @@ function CustomersPage() {
   const { data: products = [] } = useProducts("all");
 
   const [term, setTerm] = useState("");
-  const [open, setOpen] = useState<"customer" | "supplier" | null>(null);
-  const [form, setForm] = useState({ name: "", phone: "", address: "", city: "" });
+  const [activeTab, setActiveTab] = useState<string>("all");
 
-  // Payment Recovery Dialog states
-  const [selectedPayCustomer, setSelectedPayCustomer] = useState<(typeof customers)[0] | null>(null);
+  // Add / Edit Party Modal States
+  const [partyModalOpen, setPartyModalOpen] = useState(false);
+  const [editParty, setEditParty] = useState<Party | null>(null);
+  const [partyForm, setPartyForm] = useState({ name: "", phone: "", address: "", city: "" });
+
+  // 360-Degree Statement Modal State
+  const [statementParty, setStatementParty] = useState<Party | null>(null);
+
+  // Payment Recovery (Customer Udhaar) Dialog states
+  const [selectedPayCustomer, setSelectedPayCustomer] = useState<Party | null>(null);
   const [payAmount, setPayAmount] = useState(0);
   const [payMethod, setPayMethod] = useState("Cash");
   const [payNotes, setPayNotes] = useState("");
 
-  // Statement Modal State
-  const [statementCustomer, setStatementCustomer] = useState<(typeof customers)[0] | null>(null);
-  const [statementSupplier, setStatementSupplier] = useState<(typeof suppliers)[0] | null>(null);
-
   // Vendor / Supplier Payment Dialog states
-  const [selectedPaySupplier, setSelectedPaySupplier] = useState<(typeof suppliers)[0] | null>(null);
+  const [selectedPaySupplier, setSelectedPaySupplier] = useState<Party | null>(null);
   const [supplierPayAmount, setSupplierPayAmount] = useState(0);
   const [supplierPayMethod, setSupplierPayMethod] = useState("Bank Transfer");
   const [supplierPayNotes, setSupplierPayNotes] = useState("");
@@ -78,124 +90,39 @@ function CustomersPage() {
   const [receiptModal, setReceiptModal] = useState<PaymentReceiptData | null>(null);
   const [supplierVoucherModal, setSupplierVoucherModal] = useState<PaymentReceiptData | null>(null);
 
-  const customerLedgerTimeline = useMemo(() => {
-    if (!statementCustomer) return [];
-    const cId = statementCustomer.id;
+  // Unified Parties List (Merging Customers & Suppliers by ID and Name)
+  const parties = useMemo<Party[]>(() => {
+    const map = new Map<string, Party>();
 
-    const custSales = sales.filter((s) => s.customer_id === cId);
-    const custPayments = customerPayments.filter((p) => p.customer_id === cId);
-
-    const timeline: Array<{
-      id: string;
-      date: string;
-      type: "sale" | "payment";
-      refNo: string;
-      particulars: string;
-      debit: number;
-      credit: number;
-      runningBalance: number;
-    }> = [];
-
-    custSales.forEach((s) => {
-      const sItems = saleItems.filter((i) => (i as unknown as { sale_id: string }).sale_id === s.id);
-      const itemDesc = sItems.length
-        ? sItems.map((i) => `${i.product_name} (${NUM(i.quantity)} × Rs ${i.price})`).join(", ")
-        : "Credit Purchase";
-
-      timeline.push({
-        id: `sale-${s.id}`,
-        date: s.created_at,
-        type: "sale",
-        refNo: s.invoice_number,
-        particulars: itemDesc,
-        debit: Number(s.total),
-        credit: 0,
-        runningBalance: 0,
+    customers.forEach((c) => {
+      map.set(c.id, {
+        id: c.id,
+        name: c.name,
+        phone: c.phone,
+        address: c.address,
+        city: (c as unknown as { city?: string }).city || null,
+        branch_id: c.branch_id,
       });
     });
 
-    custPayments.forEach((p) => {
-      timeline.push({
-        id: `pay-${p.id}`,
-        date: p.created_at,
-        type: "payment",
-        refNo: `PAY-${p.id.slice(0, 8).toUpperCase()}`,
-        particulars: `Payment Recovery (${p.payment_method})${p.notes || p.note ? ` — ${p.notes || p.note}` : ""}`,
-        debit: 0,
-        credit: Number(p.amount),
-        runningBalance: 0,
-      });
+    suppliers.forEach((s) => {
+      const existing = map.get(s.id);
+      if (existing) {
+        existing.city = existing.city || s.city;
+        if (!existing.phone && s.phone) existing.phone = s.phone;
+      } else {
+        map.set(s.id, {
+          id: s.id,
+          name: s.name,
+          phone: s.phone,
+          address: (s as unknown as { address?: string }).address || null,
+          city: s.city,
+        });
+      }
     });
 
-    timeline.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-
-    let running = 0;
-    timeline.forEach((row) => {
-      running += row.debit - row.credit;
-      row.runningBalance = running;
-    });
-
-    return timeline;
-  }, [statementCustomer, sales, customerPayments, saleItems]);
-
-  const supplierLedgerTimeline = useMemo(() => {
-    if (!statementSupplier) return [];
-    const sId = statementSupplier.id;
-
-    const supMovements = movements.filter((m) => m.supplier_id === sId && m.movement_type === "purchase");
-    const supPayments = supplierPayments.filter((p) => p.supplier_id === sId);
-
-    const prodMap = new Map(products.map((p) => [p.id, p.name]));
-
-    const timeline: Array<{
-      id: string;
-      date: string;
-      type: "purchase" | "payment";
-      refNo: string;
-      particulars: string;
-      debit: number;
-      credit: number;
-      runningBalance: number;
-    }> = [];
-
-    supMovements.forEach((m) => {
-      const prodName = prodMap.get(m.product_id) || "Stock Purchase";
-      const cost = Number(m.quantity) * (Number(m.purchase_price) || 0);
-      timeline.push({
-        id: `mov-${m.id}`,
-        date: m.created_at,
-        type: "purchase",
-        refNo: m.reference || "PO-Stock",
-        particulars: `${prodName} (${NUM(m.quantity)} Qty @ Rs ${NUM(m.purchase_price || 0)})${m.note ? ` · ${m.note}` : ""}`,
-        debit: cost,
-        credit: 0,
-        runningBalance: 0,
-      });
-    });
-
-    supPayments.forEach((p) => {
-      timeline.push({
-        id: `pay-${p.id}`,
-        date: p.created_at,
-        type: "payment",
-        refNo: "PAY-VOUCHER",
-        particulars: `Payment via ${p.payment_method}${p.note ? ` (${p.note})` : ""}`,
-        debit: 0,
-        credit: Number(p.amount),
-        runningBalance: 0,
-      });
-    });
-
-    timeline.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-
-    let running = 0;
-    timeline.forEach((row) => {
-      running += row.debit - row.credit;
-      row.runningBalance = running;
-    });
-
-    return timeline;
-  }, [statementSupplier, movements, supplierPayments, products]);
+    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
+  }, [customers, suppliers]);
 
   const refundedBySaleMap = useMemo(() => {
     const map = new Map<string, number>();
@@ -212,31 +139,48 @@ function CustomersPage() {
     return map;
   }, [returns]);
 
-  const stats = useMemo(() => {
+  // Dual-Sided Khata Stats for Each Party
+  const partyStats = useMemo(() => {
     const m = new Map<
       string,
       {
-        spent: number;
-        due: number;
-        payments: number;
-        netBalance: number;
-        count: number;
+        salesCount: number;
+        salesBilled: number;
+        salesPaid: number;
+        receivableDue: number;
         earliestDueDate: string | null;
         overdueDays: number;
+        purchasedValue: number;
+        purchasesPaid: number;
+        payableDue: number;
+        netKhataBalance: number; // positive = we receive (+ Lene Hain), negative = we owe (- Dene Hain)
       }
     >();
 
+    const getRow = (id: string) => {
+      let r = m.get(id);
+      if (!r) {
+        r = {
+          salesCount: 0,
+          salesBilled: 0,
+          salesPaid: 0,
+          receivableDue: 0,
+          earliestDueDate: null,
+          overdueDays: 0,
+          purchasedValue: 0,
+          purchasesPaid: 0,
+          payableDue: 0,
+          netKhataBalance: 0,
+        };
+        m.set(id, r);
+      }
+      return r;
+    };
+
+    // 1. Sales & Customer Udhaar
     sales.forEach((s) => {
       if (!s.customer_id) return;
-      const row = m.get(s.customer_id) ?? {
-        spent: 0,
-        due: 0,
-        payments: 0,
-        netBalance: 0,
-        count: 0,
-        earliestDueDate: null,
-        overdueDays: 0,
-      };
+      const row = getRow(s.customer_id);
       const refSum = Math.max(
         refundedBySaleMap.get(s.id) || 0,
         refundedBySaleMap.get(s.invoice_number) || 0,
@@ -244,38 +188,50 @@ function CustomersPage() {
       const effTotal = Math.max(0, Number(s.total) - refSum);
       const effRemaining = refSum >= Number(s.total) ? 0 : Math.max(0, Number(s.remaining_amount) - refSum);
 
-      row.spent += effTotal;
-      row.due += effRemaining;
-      row.count += 1;
+      row.salesBilled += effTotal;
+      row.receivableDue += effRemaining;
+      row.salesCount += 1;
 
       if (s.due_date && effRemaining > 0) {
         if (!row.earliestDueDate || new Date(s.due_date) < new Date(row.earliestDueDate)) {
           row.earliestDueDate = s.due_date;
         }
       }
-      m.set(s.customer_id, row);
     });
 
-    // Track payments received
+    // 2. Customer Payments Received
     customerPayments.forEach((p) => {
-      const row = m.get(p.customer_id) ?? {
-        spent: 0,
-        due: 0,
-        payments: 0,
-        netBalance: 0,
-        count: 0,
-        earliestDueDate: null,
-        overdueDays: 0,
-      };
-      row.payments += Number(p.amount);
-      m.set(p.customer_id, row);
+      const row = getRow(p.customer_id);
+      row.salesPaid += Number(p.amount);
+    });
+
+    // 3. Stock Purchases (from movements)
+    movements.forEach((mov) => {
+      if (mov.supplier_id && mov.movement_type === "purchase") {
+        const row = getRow(mov.supplier_id);
+        const cost = Number(mov.quantity) * (Number(mov.purchase_price) || 0);
+        row.purchasedValue += cost;
+      }
+    });
+
+    // 4. Supplier Payments Made
+    supplierPayments.forEach((sp) => {
+      const row = getRow(sp.supplier_id);
+      row.purchasesPaid += Number(sp.amount);
     });
 
     const now = new Date();
     m.forEach((row) => {
-      row.netBalance = row.due - row.payments;
+      // Net receivable from sales
+      const netCustReceivable = row.receivableDue - row.salesPaid;
+      // Net payable from purchases
+      const netSupPayable = Math.max(0, row.purchasedValue - row.purchasesPaid);
+      row.payableDue = netSupPayable;
 
-      if (row.netBalance > 0 && row.earliestDueDate) {
+      // Net Khata Position: (Sales Due) - (Purchases Due)
+      row.netKhataBalance = netCustReceivable - netSupPayable;
+
+      if (netCustReceivable > 0 && row.earliestDueDate) {
         const diffTime = now.getTime() - new Date(row.earliestDueDate).getTime();
         const diffDays = Math.floor(diffTime / (1000 * 3600 * 24));
         row.overdueDays = diffDays > 0 ? diffDays : 0;
@@ -285,66 +241,163 @@ function CustomersPage() {
     });
 
     return m;
-  }, [sales, customerPayments, refundedBySaleMap]);
+  }, [sales, customerPayments, movements, supplierPayments, refundedBySaleMap]);
 
-  const supplierStats = useMemo(() => {
-    const m = new Map<string, { purchasedValue: number; totalPaid: number; payableBalance: number }>();
-    suppliers.forEach((s) => {
-      m.set(s.id, { purchasedValue: 0, totalPaid: 0, payableBalance: 0 });
+  // Filters
+  const filteredParties = useMemo(() => {
+    const t = term.trim().toLowerCase();
+    if (!t) return parties;
+    return parties.filter((p) =>
+      [p.name, p.phone, p.city, p.address].some((f) => (f ?? "").toLowerCase().includes(t)),
+    );
+  }, [parties, term]);
+
+  const receivableParties = useMemo(() => {
+    return filteredParties.filter((p) => {
+      const st = partyStats.get(p.id);
+      return (st?.receivableDue ?? 0) > 0 || (st?.netKhataBalance ?? 0) > 0;
+    });
+  }, [filteredParties, partyStats]);
+
+  const payableParties = useMemo(() => {
+    return filteredParties.filter((p) => {
+      const st = partyStats.get(p.id);
+      return (st?.payableDue ?? 0) > 0 || (st?.netKhataBalance ?? 0) < 0;
+    });
+  }, [filteredParties, partyStats]);
+
+  // Unified 360-Degree Party Ledger Timeline
+  const unifiedPartyTimeline = useMemo(() => {
+    if (!statementParty) return [];
+    const pId = statementParty.id;
+
+    const timeline: Array<{
+      id: string;
+      date: string;
+      type: "sale" | "cust_payment" | "purchase" | "sup_payment";
+      refNo: string;
+      particulars: string;
+      debit: number;  // Humne Lene Hain (+ Receivable)
+      credit: number; // Humne Dene Hain / Paid (- Payable / Received)
+      runningBalance: number;
+    }> = [];
+
+    // 1. Sales to this party
+    sales.filter((s) => s.customer_id === pId).forEach((s) => {
+      const sItems = saleItems.filter((i) => (i as unknown as { sale_id: string }).sale_id === s.id);
+      const itemDesc = sItems.length
+        ? sItems.map((i) => `${i.product_name} (${NUM(i.quantity)} × Rs ${i.price})`).join(", ")
+        : "Credit Sale";
+      timeline.push({
+        id: `sale-${s.id}`,
+        date: s.created_at,
+        type: "sale",
+        refNo: s.invoice_number,
+        particulars: `Farokht / Sale: ${itemDesc}`,
+        debit: Number(s.total),
+        credit: 0,
+        runningBalance: 0,
+      });
     });
 
-    movements.forEach((mov) => {
-      if (mov.supplier_id && mov.movement_type === "purchase") {
-        const row = m.get(mov.supplier_id) ?? { purchasedValue: 0, totalPaid: 0, payableBalance: 0 };
-        row.purchasedValue += Number(mov.quantity) * (Number(mov.purchase_price) || 0);
-        m.set(mov.supplier_id, row);
-      }
+    // 2. Customer Payments received from this party
+    customerPayments.filter((p) => p.customer_id === pId).forEach((p) => {
+      timeline.push({
+        id: `cpay-${p.id}`,
+        date: p.created_at,
+        type: "cust_payment",
+        refNo: `REC-${p.id.slice(0, 8).toUpperCase()}`,
+        particulars: `Payment Received (${p.payment_method})${p.notes || p.note ? ` — ${p.notes || p.note}` : ""}`,
+        debit: 0,
+        credit: Number(p.amount),
+        runningBalance: 0,
+      });
     });
 
-    supplierPayments.forEach((sp) => {
-      const row = m.get(sp.supplier_id);
-      if (row) {
-        row.totalPaid += Number(sp.amount);
-      }
+    // 3. Stock Purchases from this party
+    const prodMap = new Map(products.map((p) => [p.id, p.name]));
+    movements.filter((m) => m.supplier_id === pId && m.movement_type === "purchase").forEach((m) => {
+      const prodName = prodMap.get(m.product_id) || "Stock Purchase";
+      const cost = Number(m.quantity) * (Number(m.purchase_price) || 0);
+      timeline.push({
+        id: `mov-${m.id}`,
+        date: m.created_at,
+        type: "purchase",
+        refNo: m.reference || "PO-Stock",
+        particulars: `Khareedari / Stock In: ${prodName} (${NUM(m.quantity)} Qty @ Rs ${NUM(m.purchase_price || 0)})${m.note ? ` · ${m.note}` : ""}`,
+        debit: 0,
+        credit: cost,
+        runningBalance: 0,
+      });
     });
 
-    m.forEach((row) => {
-      row.payableBalance = Math.max(0, row.purchasedValue - row.totalPaid);
+    // 4. Payments made to this party
+    supplierPayments.filter((sp) => sp.supplier_id === pId).forEach((sp) => {
+      timeline.push({
+        id: `spay-${sp.id}`,
+        date: sp.created_at,
+        type: "sup_payment",
+        refNo: "PAY-VOUCHER",
+        particulars: `Vendor Payment Paid (${sp.payment_method})${sp.notes ? ` — ${sp.notes}` : ""}`,
+        debit: Number(sp.amount),
+        credit: 0,
+        runningBalance: 0,
+      });
     });
 
-    return m;
-  }, [suppliers, movements, supplierPayments]);
+    timeline.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
-  const filtered = customers.filter((c) =>
-    !term.trim() || [c.name, c.phone].some((f) => (f ?? "").toLowerCase().includes(term.toLowerCase())),
-  );
+    let running = 0;
+    timeline.forEach((row) => {
+      running += row.debit - row.credit;
+      row.runningBalance = running;
+    });
 
-  const udhaarCustomers = useMemo(() => {
-    return filtered.filter((c) => (stats.get(c.id)?.due ?? 0) > 0);
-  }, [filtered, stats]);
+    return timeline;
+  }, [statementParty, sales, customerPayments, movements, supplierPayments, saleItems, products]);
 
-  const save = async () => {
-    if (!form.name.trim()) {
-      toast.error("Name is required");
+  // Save Party (Creates both customer and supplier entries with identical UUID)
+  const saveParty = async () => {
+    if (!partyForm.name.trim()) {
+      toast.error("Party name is required");
       return;
     }
-    const { error } =
-      open === "supplier"
-        ? await supabase.from("suppliers").insert({ name: form.name, phone: form.phone || null, city: form.city || null })
-        : await supabase.from("customers").insert({
-            name: form.name,
-            phone: form.phone || null,
-            address: form.address || null,
-            branch_id: activeBranch !== "all" ? activeBranch : (profile?.branch_id ?? branches[0]?.id ?? null),
-          });
-    if (error) {
-      toast.error(error.message);
+    const targetBranch = activeBranch !== "all" ? activeBranch : (profile?.branch_id ?? branches[0]?.id ?? null);
+    const partyId = editParty?.id || crypto.randomUUID();
+
+    // 1. Upsert into customers table
+    const { error: custErr } = await supabase.from("customers").upsert({
+      id: partyId,
+      name: partyForm.name.trim(),
+      phone: partyForm.phone.trim() || null,
+      address: partyForm.address.trim() || null,
+      city: partyForm.city.trim() || null,
+      branch_id: targetBranch,
+    });
+
+    if (custErr) {
+      toast.error("Failed to save party: " + custErr.message);
       return;
     }
-    toast.success(open === "supplier" ? "Supplier added" : "Customer added");
-    setForm({ name: "", phone: "", address: "", city: "" });
-    setOpen(null);
-    void qc.invalidateQueries();
+
+    // 2. Mirror into suppliers table with same ID
+    const { error: supErr } = await supabase.from("suppliers").upsert({
+      id: partyId,
+      name: partyForm.name.trim(),
+      phone: partyForm.phone.trim() || null,
+      city: partyForm.city.trim() || null,
+    });
+
+    if (supErr) {
+      console.warn("Supplier mirror notice:", supErr.message);
+    }
+
+    toast.success(editParty ? "Party updated successfully" : "New Party registered successfully");
+    setPartyModalOpen(false);
+    setEditParty(null);
+    setPartyForm({ name: "", phone: "", address: "", city: "" });
+    void qc.invalidateQueries({ queryKey: ["customers"] });
+    void qc.invalidateQueries({ queryKey: ["suppliers"] });
   };
 
   const handleSavePayment = async () => {
@@ -353,7 +406,7 @@ function CustomersPage() {
       return;
     }
 
-    const currentDue = stats.get(selectedPayCustomer.id)?.due ?? 0;
+    const currentDue = partyStats.get(selectedPayCustomer.id)?.receivableDue ?? 0;
     if (payAmount > currentDue && currentDue > 0) {
       toast.warning(`Received amount PKR ${payAmount} is greater than current due PKR ${currentDue}`);
     }
@@ -402,7 +455,7 @@ function CustomersPage() {
       return;
     }
 
-    const currentPayable = supplierStats.get(selectedPaySupplier.id)?.payableBalance ?? 0;
+    const currentPayable = partyStats.get(selectedPaySupplier.id)?.payableDue ?? 0;
     const targetBranch = activeBranch !== "all" ? activeBranch : (profile?.branch_id ?? branches[0]?.id ?? "");
 
     const { error } = await supabase.from("supplier_payments").insert({
@@ -439,248 +492,424 @@ function CustomersPage() {
     void qc.invalidateQueries({ queryKey: ["supplier_payments"] });
   };
 
-  return (
-    <AppShell
-      title="Customers & Udhaar Recovery"
-      subtitle={`${customers.length} customers (${udhaarCustomers.length} with pending Udhaar) · ${suppliers.length} suppliers`}
-      actions={
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() =>
-            exportRows(
-              filtered.map((c) => ({
-                Name: c.name,
-                Phone: c.phone,
-                Address: c.address,
-                Purchases: stats.get(c.id)?.count ?? 0,
-                "Total Spent": stats.get(c.id)?.spent ?? 0,
-                "Outstanding Udhaar": stats.get(c.id)?.due ?? 0,
-              })),
-              "customers_udhaar_ledger",
-            )
-          }
-        >
-          <Download className="mr-2 h-4 w-4" /> Export Ledger
-        </Button>
-      }
-    >
-      <Tabs defaultValue="customers">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <TabsList>
-            <TabsTrigger value="customers">All Customers ({customers.length})</TabsTrigger>
-            <TabsTrigger value="udhaar">
-              Udhaar Customers <Badge variant="destructive" className="ml-1.5 px-1.5 py-0 text-[10px] bg-red-600 text-white">{udhaarCustomers.length}</Badge>
-            </TabsTrigger>
-            <TabsTrigger value="suppliers">Suppliers ({suppliers.length})</TabsTrigger>
-          </TabsList>
-          <div className="flex gap-2">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input className="w-[220px] pl-9" placeholder="Search name or phone" value={term} onChange={(e) => setTerm(e.target.value)} />
-            </div>
-            <Button size="sm" onClick={() => setOpen("customer")}><Plus className="mr-2 h-4 w-4" /> Customer</Button>
-            <Button size="sm" variant="outline" onClick={() => setOpen("supplier")}><Plus className="mr-2 h-4 w-4" /> Supplier</Button>
-          </div>
-        </div>
+  const renderPartyTable = (partyList: Party[]) => (
+    <Card>
+      <CardContent className="overflow-x-auto p-4">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Party / Business Name</TableHead>
+              <TableHead>Phone & City</TableHead>
+              <TableHead className="text-right">Sales (Baicha)</TableHead>
+              <TableHead className="text-right">Purchases (Khareeda)</TableHead>
+              <TableHead className="text-right font-bold">Net Khata (صاف کھاتہ)</TableHead>
+              <TableHead className="text-right">Actions</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {partyList.map((p) => {
+              const st = partyStats.get(p.id);
+              const netBal = st?.netKhataBalance ?? 0;
+              const salesVal = st?.salesBilled ?? 0;
+              const purchVal = st?.purchasedValue ?? 0;
+              const isOverdue = (st?.overdueDays ?? 0) > 0;
 
-        {/* All Customers Tab */}
-        <TabsContent value="customers">
-          <Card><CardContent className="overflow-x-auto p-4">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Phone</TableHead>
-                  <TableHead>Address</TableHead>
-                  <TableHead className="text-right">Invoices</TableHead>
-                  <TableHead className="text-right">Total Spent</TableHead>
-                  <TableHead className="text-right">Outstanding Udhaar</TableHead>
-                  <TableHead className="text-right">Action</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filtered.map((c) => {
-                  const netBal = stats.get(c.id)?.netBalance ?? 0;
-                  const isDebt = netBal > 0;
-                  const isAdvance = netBal < 0;
-
-                  return (
-                    <TableRow key={c.id}>
-                      <TableCell className="font-medium">{c.name}</TableCell>
-                      <TableCell>{c.phone ?? "—"}</TableCell>
-                      <TableCell className="text-sm text-muted-foreground">{c.address ?? "—"}</TableCell>
-                      <TableCell className="text-right">{stats.get(c.id)?.count ?? 0}</TableCell>
-                      <TableCell className="text-right font-medium">{PKR(stats.get(c.id)?.spent ?? 0)}</TableCell>
-                      <TableCell className="text-right">
-                        {isDebt ? (
-                          <Badge variant="destructive" className="bg-red-600 text-white font-bold">🔴 {PKR(netBal)} Udhaar</Badge>
-                        ) : isAdvance ? (
-                          <Badge className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold">🟢 {PKR(Math.abs(netBal))} Advance Credit</Badge>
-                        ) : (
-                          <span className="text-emerald-600 font-semibold">Clean (Rs 0)</span>
+              return (
+                <TableRow key={p.id}>
+                  <TableCell>
+                    <div className="flex flex-col gap-0.5">
+                      <span className="font-semibold text-foreground flex items-center gap-1.5">
+                        <Users className="h-4 w-4 text-primary" /> {p.name}
+                      </span>
+                      {p.address && <span className="text-[11px] text-muted-foreground truncate max-w-[200px]">{p.address}</span>}
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex flex-col text-xs">
+                      <span>{p.phone ?? "—"}</span>
+                      <span className="text-muted-foreground">{p.city ?? "—"}</span>
+                    </div>
+                  </TableCell>
+                  <TableCell className="text-right font-medium text-xs">
+                    {PKR(salesVal)}
+                    {st?.receivableDue ? (
+                      <span className="block text-[10px] text-red-600 font-semibold">Due: {PKR(st.receivableDue)}</span>
+                    ) : null}
+                  </TableCell>
+                  <TableCell className="text-right font-medium text-xs">
+                    {PKR(purchVal)}
+                    {st?.payableDue ? (
+                      <span className="block text-[10px] text-blue-600 font-semibold">Due: {PKR(st.payableDue)}</span>
+                    ) : null}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    {netBal > 0 ? (
+                      <div className="flex flex-col items-end gap-0.5">
+                        <Badge variant="destructive" className="bg-red-600 text-white font-bold">
+                          🔴 {PKR(netBal)} Lene Hain
+                        </Badge>
+                        {isOverdue && (
+                          <span className="text-[9px] font-bold text-red-600">
+                            {st?.overdueDays}d Overdue!
+                          </span>
                         )}
-                      </TableCell>
-                      <TableCell className="text-right flex items-center justify-end gap-1.5">
+                      </div>
+                    ) : netBal < 0 ? (
+                      <Badge className="bg-blue-600 hover:bg-blue-700 text-white font-bold">
+                        🔵 {PKR(Math.abs(netBal))} Dene Hain
+                      </Badge>
+                    ) : (
+                      <span className="text-emerald-600 font-semibold text-xs">🟢 Clean (Rs 0)</span>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <div className="flex items-center justify-end gap-1">
+                      <Button
+                        size="xs"
+                        variant="outline"
+                        onClick={() => setStatementParty(p)}
+                        title="View 360° Complete Khata Statement"
+                      >
+                        <FileText className="mr-1 h-3.5 w-3.5 text-primary" /> Statement
+                      </Button>
+
+                      {netBal > 0 ? (
                         <Button
                           size="xs"
-                          variant="outline"
-                          onClick={() => setStatementCustomer(c)}
-                        >
-                          <FileText className="mr-1 h-3.5 w-3.5" /> Statement
-                        </Button>
-                        <Button
-                          size="xs"
-                          variant={isDebt ? "default" : "outline"}
-                          className={isDebt ? "bg-emerald-600 hover:bg-emerald-700 text-white" : ""}
-                          onClick={() => {
-                            setSelectedPayCustomer(c);
-                            setPayAmount(isDebt ? netBal : 0);
-                          }}
-                        >
-                          <CreditCard className="mr-1 h-3.5 w-3.5" /> {isDebt ? "Receive Udhaar" : "Add Payment"}
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-                {!filtered.length && <TableRow><TableCell colSpan={7} className="py-8 text-center text-sm text-muted-foreground">No customers found.</TableCell></TableRow>}
-              </TableBody>
-            </Table>
-          </CardContent></Card>
-        </TabsContent>
-
-        {/* Dedicated Udhaar Customers Tab */}
-        <TabsContent value="udhaar">
-          <Card><CardContent className="overflow-x-auto p-4">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Customer Name</TableHead>
-                  <TableHead>Phone Number</TableHead>
-                  <TableHead className="text-right">Pending Udhaar Balance</TableHead>
-                  <TableHead>Due Date & Overdue Alert</TableHead>
-                  <TableHead className="text-right">Quick Action</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {udhaarCustomers.map((c) => {
-                  const st = stats.get(c.id);
-                  const due = st?.due ?? 0;
-                  const isOverdue = (st?.overdueDays ?? 0) > 0;
-
-                  return (
-                    <TableRow key={c.id}>
-                      <TableCell className="font-semibold text-foreground">{c.name}</TableCell>
-                      <TableCell>{c.phone ?? "—"}</TableCell>
-                      <TableCell className="text-right font-bold text-red-600 text-sm">{PKR(due)}</TableCell>
-                      <TableCell>
-                        {isOverdue ? (
-                          <Badge variant="destructive" className="bg-red-600 text-white font-bold">
-                            🔴 OVERDUE! Due: {st?.earliestDueDate} ({st?.overdueDays} Days Overdue)
-                          </Badge>
-                        ) : st?.earliestDueDate ? (
-                          <Badge variant="outline" className="text-xs font-semibold text-amber-700 dark:text-amber-400">
-                            Due Date: {st.earliestDueDate}
-                          </Badge>
-                        ) : (
-                          <span className="text-xs text-muted-foreground">Standard Udhaar</span>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <Button
-                          size="sm"
                           className="bg-emerald-600 hover:bg-emerald-700 text-white"
                           onClick={() => {
-                            setSelectedPayCustomer(c);
-                            setPayAmount(due);
+                            setSelectedPayCustomer(p);
+                            setPayAmount(netBal);
                           }}
                         >
-                          <CreditCard className="mr-1.5 h-4 w-4" /> Clear Udhaar
+                          <CreditCard className="mr-1 h-3.5 w-3.5" /> Receive
                         </Button>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-                {!udhaarCustomers.length && (
-                  <TableRow>
-                    <TableCell colSpan={5} className="py-8 text-center text-sm text-emerald-600 font-semibold">
-                      🎉 No pending Udhaar customers! All customer accounts are clear.
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
-          </CardContent></Card>
-        </TabsContent>
-
-        {/* Suppliers / Vendor Accounts Ledger Tab */}
-        <TabsContent value="suppliers">
-          <Card><CardContent className="overflow-x-auto p-4">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Vendor / Supplier</TableHead>
-                  <TableHead>Phone</TableHead>
-                  <TableHead>City</TableHead>
-                  <TableHead className="text-right">Total Stock Purchased</TableHead>
-                  <TableHead className="text-right">Total Payments Made</TableHead>
-                  <TableHead className="text-right font-bold">Outstanding Payable (Dene Hain)</TableHead>
-                  <TableHead className="text-right">Quick Action</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {suppliers.map((s) => {
-                  const st = supplierStats.get(s.id);
-                  const purchased = st?.purchasedValue ?? 0;
-                  const paidVal = st?.totalPaid ?? 0;
-                  const payable = st?.payableBalance ?? 0;
-
-                  return (
-                    <TableRow key={s.id}>
-                      <TableCell className="font-semibold text-foreground flex items-center gap-2">
-                        <Building2 className="h-4 w-4 text-primary" /> {s.name}
-                      </TableCell>
-                      <TableCell>{s.phone ?? "—"}</TableCell>
-                      <TableCell>{s.city ?? "—"}</TableCell>
-                      <TableCell className="text-right font-medium">{PKR(purchased)}</TableCell>
-                      <TableCell className="text-right font-medium text-emerald-600">{PKR(paidVal)}</TableCell>
-                      <TableCell className="text-right font-bold text-sm">
-                        {payable > 0 ? (
-                          <Badge variant="destructive" className="bg-red-600 text-white font-bold">{PKR(payable)}</Badge>
-                        ) : (
-                          <span className="text-emerald-600 font-semibold">Cleared (Rs 0)</span>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-right flex items-center justify-end gap-1.5">
-                        <Button
-                          size="xs"
-                          variant="outline"
-                          onClick={() => setStatementSupplier(s)}
-                          title="View Supplier Account Statement & Ledger"
-                        >
-                          <FileText className="mr-1 h-3.5 w-3.5" /> Statement
-                        </Button>
+                      ) : netBal < 0 ? (
                         <Button
                           size="xs"
                           className="bg-primary hover:bg-primary/90 text-white"
                           onClick={() => {
-                            setSelectedPaySupplier(s);
-                            setSupplierPayAmount(payable > 0 ? payable : 0);
+                            setSelectedPaySupplier(p);
+                            setSupplierPayAmount(Math.abs(netBal));
                           }}
                         >
-                          <CreditCard className="mr-1 h-3.5 w-3.5" /> Pay Supplier
+                          <CreditCard className="mr-1 h-3.5 w-3.5" /> Pay
                         </Button>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-                {!suppliers.length && <TableRow><TableCell colSpan={7} className="py-8 text-center text-sm text-muted-foreground">No suppliers registered yet.</TableCell></TableRow>}
-              </TableBody>
-            </Table>
-          </CardContent></Card>
+                      ) : (
+                        <Button
+                          size="xs"
+                          variant="ghost"
+                          onClick={() => {
+                            setSelectedPayCustomer(p);
+                            setPayAmount(0);
+                          }}
+                        >
+                          <CreditCard className="mr-1 h-3.5 w-3.5" /> Pay/Rec
+                        </Button>
+                      )}
+
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-7 w-7"
+                        onClick={() => {
+                          setEditParty(p);
+                          setPartyForm({
+                            name: p.name,
+                            phone: p.phone ?? "",
+                            address: p.address ?? "",
+                            city: p.city ?? "",
+                          });
+                          setPartyModalOpen(true);
+                        }}
+                      >
+                        <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              );
+            })}
+            {!partyList.length && (
+              <TableRow>
+                <TableCell colSpan={6} className="py-8 text-center text-sm text-muted-foreground">
+                  No parties found matching your search.
+                </TableCell>
+              </TableRow>
+            )}
+          </TableBody>
+        </Table>
+      </CardContent>
+    </Card>
+  );
+
+  return (
+    <AppShell
+      title="Parties & Khata (پارٹیاں اور کھاتہ جات)"
+      subtitle={`${parties.length} Total Parties · ${receivableParties.length} Receivables (Lene Hain) · ${payableParties.length} Payables (Dene Hain)`}
+      actions={
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() =>
+              exportRows(
+                parties.map((p) => {
+                  const st = partyStats.get(p.id);
+                  return {
+                    "Party Name": p.name,
+                    Phone: p.phone ?? "",
+                    City: p.city ?? "",
+                    Address: p.address ?? "",
+                    "Sales Total": st?.salesBilled ?? 0,
+                    "Purchases Total": st?.purchasedValue ?? 0,
+                    "Receivable (Lene Hain)": st?.receivableDue ?? 0,
+                    "Payable (Dene Hain)": st?.payableDue ?? 0,
+                    "Net Balance": st?.netKhataBalance ?? 0,
+                  };
+                }),
+                "parties_complete_khata",
+              )
+            }
+          >
+            <Download className="mr-2 h-4 w-4" /> Export Khata
+          </Button>
+          <Button
+            size="sm"
+            onClick={() => {
+              setEditParty(null);
+              setPartyForm({ name: "", phone: "", address: "", city: "" });
+              setPartyModalOpen(true);
+            }}
+          >
+            <Plus className="mr-2 h-4 w-4" /> Add New Party
+          </Button>
+        </div>
+      }
+    >
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <TabsList>
+            <TabsTrigger value="all">
+              All Parties ({parties.length})
+            </TabsTrigger>
+            <TabsTrigger value="receivables">
+              Receivables / Udhaar (ہم نے لینے ہیں){" "}
+              <Badge variant="destructive" className="ml-1.5 px-1.5 py-0 text-[10px] bg-red-600 text-white">
+                {receivableParties.length}
+              </Badge>
+            </TabsTrigger>
+            <TabsTrigger value="payables">
+              Payables (ہم نے دینے ہیں){" "}
+              <Badge className="ml-1.5 px-1.5 py-0 text-[10px] bg-blue-600 text-white">
+                {payableParties.length}
+              </Badge>
+            </TabsTrigger>
+          </TabsList>
+          <div className="flex gap-2">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                className="w-[240px] pl-9"
+                placeholder="Search name, phone, city…"
+                value={term}
+                onChange={(e) => setTerm(e.target.value)}
+              />
+            </div>
+          </div>
+        </div>
+
+        <TabsContent value="all" className="mt-4">
+          {renderPartyTable(filteredParties)}
+        </TabsContent>
+
+        <TabsContent value="receivables" className="mt-4">
+          {renderPartyTable(receivableParties)}
+        </TabsContent>
+
+        <TabsContent value="payables" className="mt-4">
+          {renderPartyTable(payableParties)}
         </TabsContent>
       </Tabs>
+
+      {/* Add / Edit Party Dialog */}
+      <Dialog open={partyModalOpen} onOpenChange={setPartyModalOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Users className="h-5 w-5 text-primary" />
+              {editParty ? "Edit Trading Party" : "Add New Trading Party (پارٹی شامل کریں)"}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 text-sm pt-2">
+            <div className="space-y-1.5">
+              <Label>Party / Business Name <span className="text-destructive">*</span></Label>
+              <Input
+                placeholder="e.g. Al-Madina Pharma or Bilal Traders"
+                value={partyForm.name}
+                onChange={(e) => setPartyForm({ ...partyForm, name: e.target.value })}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Phone Number</Label>
+              <Input
+                placeholder="03001234567"
+                value={partyForm.phone}
+                onChange={(e) => setPartyForm({ ...partyForm, phone: e.target.value })}
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div className="space-y-1.5">
+                <Label>City</Label>
+                <Input
+                  placeholder="Kasur / Talwandi"
+                  value={partyForm.city}
+                  onChange={(e) => setPartyForm({ ...partyForm, city: e.target.value })}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Address / Location</Label>
+                <Input
+                  placeholder="e.g. Grain Market"
+                  value={partyForm.address}
+                  onChange={(e) => setPartyForm({ ...partyForm, address: e.target.value })}
+                />
+              </div>
+            </div>
+            <div className="rounded-md border bg-muted/40 p-2.5 text-xs text-muted-foreground">
+              💡 Yeh party sale (customer) aur purchase (supplier) dono ke liye automatically use ho sakegi.
+            </div>
+          </div>
+          <DialogFooter className="pt-2">
+            <Button variant="outline" onClick={() => setPartyModalOpen(false)}>Cancel</Button>
+            <Button onClick={() => void saveParty()}>Save Party</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 360-Degree Unified Party Statement & Dual-Sided Ledger Modal */}
+      <Dialog open={!!statementParty} onOpenChange={(v) => !v && setStatementParty(null)}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center justify-between">
+              <span>360° Complete Party Statement & Khata Ledger</span>
+              <Button
+                size="xs"
+                variant="outline"
+                onClick={() => statementParty && printReportDocument("printable-party-statement", `Statement_${statementParty.name}`)}
+              >
+                <Printer className="mr-1.5 h-3.5 w-3.5" /> Print Statement
+              </Button>
+            </DialogTitle>
+          </DialogHeader>
+
+          {statementParty && (
+            <div id="printable-party-statement" className="space-y-4 py-2">
+              {/* Header */}
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b pb-3">
+                <div>
+                  <h2 className="text-xl font-bold text-foreground">MIAN ALI TRADERS</h2>
+                  <p className="text-xs text-muted-foreground">Animal Medicines, Feed & Wanda · 360° Complete Khata Statement</p>
+                </div>
+                <div className="text-right text-xs">
+                  <p className="font-bold text-base text-foreground">{statementParty.name}</p>
+                  <p className="text-muted-foreground">{statementParty.phone || "No Phone"}</p>
+                  <p className="text-muted-foreground">{statementParty.city ? `${statementParty.city} · ` : ""}{statementParty.address || "Kasur / Talwandi"}</p>
+                </div>
+              </div>
+
+              {/* Summary Cards */}
+              <div className="grid grid-cols-4 gap-2.5">
+                <div className="rounded-md border bg-muted/30 p-2.5 text-center">
+                  <p className="text-xs text-muted-foreground">Total Sales (Baicha)</p>
+                  <p className="text-base font-bold text-foreground">{PKR(partyStats.get(statementParty.id)?.salesBilled ?? 0)}</p>
+                  <p className="text-[10px] text-muted-foreground">Paid: {PKR(partyStats.get(statementParty.id)?.salesPaid ?? 0)}</p>
+                </div>
+                <div className="rounded-md border bg-muted/30 p-2.5 text-center">
+                  <p className="text-xs text-muted-foreground">Total Purchases (Khareeda)</p>
+                  <p className="text-base font-bold text-foreground">{PKR(partyStats.get(statementParty.id)?.purchasedValue ?? 0)}</p>
+                  <p className="text-[10px] text-muted-foreground">Paid: {PKR(partyStats.get(statementParty.id)?.purchasesPaid ?? 0)}</p>
+                </div>
+                <div className="rounded-md border bg-muted/30 p-2.5 text-center">
+                  <p className="text-xs text-muted-foreground">Side-by-Side Balance</p>
+                  <p className="text-xs font-semibold text-red-600">Udhaar: {PKR(partyStats.get(statementParty.id)?.receivableDue ?? 0)}</p>
+                  <p className="text-xs font-semibold text-blue-600">Payable: {PKR(partyStats.get(statementParty.id)?.payableDue ?? 0)}</p>
+                </div>
+                <div className="rounded-md border bg-card p-2.5 text-center border-primary/40">
+                  <p className="text-xs text-muted-foreground font-medium">Net Position (صاف کھاتہ)</p>
+                  <p className="text-sm font-bold pt-0.5">
+                    {(partyStats.get(statementParty.id)?.netKhataBalance ?? 0) > 0 ? (
+                      <span className="text-red-600">🔴 {PKR(partyStats.get(statementParty.id)?.netKhataBalance)} Lene Hain</span>
+                    ) : (partyStats.get(statementParty.id)?.netKhataBalance ?? 0) < 0 ? (
+                      <span className="text-blue-600">🔵 {PKR(Math.abs(partyStats.get(statementParty.id)?.netKhataBalance ?? 0))} Dene Hain</span>
+                    ) : (
+                      <span className="text-emerald-600">🟢 Clean (Rs 0)</span>
+                    )}
+                  </p>
+                </div>
+              </div>
+
+              {/* Dual-Sided Combined Ledger Timeline Table */}
+              <div className="rounded-md border overflow-hidden">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-muted/50">
+                      <TableHead>Date</TableHead>
+                      <TableHead>Ref #</TableHead>
+                      <TableHead>Particulars & Item Details</TableHead>
+                      <TableHead className="text-right">Billed / Lene (+)</TableHead>
+                      <TableHead className="text-right">Paid / Diye (-)</TableHead>
+                      <TableHead className="text-right">Running Net Balance</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {unifiedPartyTimeline.map((row) => (
+                      <TableRow key={row.id} className="text-xs">
+                        <TableCell className="font-medium whitespace-nowrap">{formatDateOnly(row.date)}</TableCell>
+                        <TableCell className="font-bold">
+                          <Badge variant="outline" className="text-[10px]">
+                            {row.refNo}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="max-w-xs">{row.particulars}</TableCell>
+                        <TableCell className="text-right font-semibold text-red-600">
+                          {row.debit > 0 ? PKR(row.debit) : "—"}
+                        </TableCell>
+                        <TableCell className="text-right font-semibold text-emerald-600">
+                          {row.credit > 0 ? PKR(row.credit) : "—"}
+                        </TableCell>
+                        <TableCell className="text-right font-bold">
+                          {row.runningBalance > 0 ? (
+                            <span className="text-red-600">{PKR(row.runningBalance)} Lene</span>
+                          ) : row.runningBalance < 0 ? (
+                            <span className="text-blue-600">{PKR(Math.abs(row.runningBalance))} Dene</span>
+                          ) : (
+                            "Rs 0"
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                    {!unifiedPartyTimeline.length && (
+                      <TableRow>
+                        <TableCell colSpan={6} className="text-center text-muted-foreground py-6">
+                          No transactions found for this party.
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setStatementParty(null)}>Close</Button>
+            <Button onClick={() => statementParty && printReportDocument("printable-party-statement", `Statement_${statementParty.name}`)}>
+              <Printer className="mr-2 h-4 w-4" /> Print / Save PDF
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Receive Udhaar Payment Modal */}
       <Dialog open={!!selectedPayCustomer} onOpenChange={(v) => !v && setSelectedPayCustomer(null)}>
@@ -693,10 +922,10 @@ function CustomersPage() {
           {selectedPayCustomer && (
             <div className="space-y-4 pt-2">
               <div className="rounded-md border bg-muted/30 p-3 space-y-1 text-xs">
-                <p><span className="font-semibold">Customer:</span> {selectedPayCustomer.name}</p>
+                <p><span className="font-semibold">Party / Customer:</span> {selectedPayCustomer.name}</p>
                 <p><span className="font-semibold">Phone:</span> {selectedPayCustomer.phone || "—"}</p>
                 <p className="text-sm font-bold text-red-600 pt-1">
-                  Current Udhaar Due: {PKR(stats.get(selectedPayCustomer.id)?.due ?? 0)}
+                  Current Udhaar Due: {PKR(partyStats.get(selectedPayCustomer.id)?.receivableDue ?? 0)}
                 </p>
               </div>
 
@@ -791,6 +1020,8 @@ function CustomersPage() {
             </Button>
           </DialogFooter>
         </DialogContent>
+      </Dialog>
+
       {/* Pay Supplier / Vendor Payment Modal */}
       <Dialog open={!!selectedPaySupplier} onOpenChange={(v) => !v && setSelectedPaySupplier(null)}>
         <DialogContent className="max-w-md">
@@ -805,7 +1036,7 @@ function CustomersPage() {
                 <p><span className="font-semibold">Vendor / Supplier:</span> {selectedPaySupplier.name}</p>
                 <p><span className="font-semibold">Phone:</span> {selectedPaySupplier.phone || "—"}</p>
                 <p className="text-sm font-bold text-red-600 pt-1">
-                  Outstanding Payable (Dene Hain): {PKR(supplierStats.get(selectedPaySupplier.id)?.payableBalance ?? 0)}
+                  Outstanding Payable (Dene Hain): {PKR(partyStats.get(selectedPaySupplier.id)?.payableDue ?? 0)}
                 </p>
               </div>
 
@@ -827,16 +1058,16 @@ function CustomersPage() {
                   <SelectContent>
                     <SelectItem value="Bank Transfer">Bank Transfer</SelectItem>
                     <SelectItem value="Cash">Cash</SelectItem>
-                    <SelectItem value="Cheque">Cheque</SelectItem>
                     <SelectItem value="EasyPaisa">EasyPaisa</SelectItem>
                     <SelectItem value="JazzCash">JazzCash</SelectItem>
+                    <SelectItem value="Cheque">Cheque</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
 
               <div className="space-y-1.5">
-                <Label className="text-xs">Reference Note / Cheque # (Optional)</Label>
-                <Input placeholder="e.g. Bank Transfer Ref #98765" value={supplierPayNotes} onChange={(e) => setSupplierPayNotes(e.target.value)} />
+                <Label className="text-xs">Reference Note / Transaction ID (Optional)</Label>
+                <Input placeholder="e.g. Bank slip #9821" value={supplierPayNotes} onChange={(e) => setSupplierPayNotes(e.target.value)} />
               </div>
             </div>
           )}
@@ -863,24 +1094,24 @@ function CustomersPage() {
               <div className="text-center">
                 <img src="/logo.png" alt="Mian Ali Traders" className="mx-auto mb-2 h-14 w-auto object-contain" />
                 <p className="font-bold text-base">MIAN ALI TRADERS</p>
-                <p className="text-xs text-muted-foreground">{supplierVoucherModal.branchName} — Vendor Payment Voucher</p>
+                <p className="text-xs text-muted-foreground">{supplierVoucherModal.branchName}</p>
                 <p className="text-[11px] text-muted-foreground">{new Date(supplierVoucherModal.date).toLocaleString()}</p>
               </div>
 
               <div className="border-t border-b py-2 space-y-1 text-xs">
-                <p><span className="font-semibold">Paid To Vendor:</span> {supplierVoucherModal.customerName}</p>
+                <p><span className="font-semibold">Paid To:</span> {supplierVoucherModal.customerName}</p>
                 {supplierVoucherModal.customerPhone && <p><span className="font-semibold">Phone:</span> {supplierVoucherModal.customerPhone}</p>}
                 <p><span className="font-semibold">Payment Method:</span> {supplierVoucherModal.paymentMethod}</p>
-                {supplierVoucherModal.notes && <p><span className="font-semibold">Note / Ref:</span> {supplierVoucherModal.notes}</p>}
+                {supplierVoucherModal.notes && <p><span className="font-semibold">Note:</span> {supplierVoucherModal.notes}</p>}
               </div>
 
               <div className="space-y-1 text-xs">
-                <div className="flex justify-between font-bold text-sm text-emerald-700">
+                <div className="flex justify-between font-bold text-sm text-primary">
                   <span>Amount Paid:</span>
                   <span>{PKR(supplierVoucherModal.amountPaid)}</span>
                 </div>
                 <div className="flex justify-between font-semibold pt-1">
-                  <span>Remaining Payable Balance:</span>
+                  <span>Remaining Payable (Dene Hain):</span>
                   <span className={supplierVoucherModal.remainingDue > 0 ? "text-red-600" : "text-emerald-600"}>
                     {PKR(supplierVoucherModal.remainingDue)}
                   </span>
@@ -888,7 +1119,7 @@ function CustomersPage() {
               </div>
 
               <div className="text-center pt-3 text-[11px] text-muted-foreground border-t">
-                Vendor Payment Record Saved.
+                Vendor Payment Voucher
               </div>
             </div>
           )}
@@ -897,247 +1128,6 @@ function CustomersPage() {
             <Button variant="outline" onClick={() => setSupplierVoucherModal(null)}>Close</Button>
             <Button onClick={() => window.print()}>
               <Printer className="mr-2 h-4 w-4" /> Print Voucher
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </Dialog>
-
-      {/* Add Customer / Supplier Modal */}
-      <Dialog open={!!open} onOpenChange={(v) => !v && setOpen(null)}>
-        <DialogContent className="max-w-md">
-          <DialogHeader><DialogTitle>{open === "supplier" ? "Add supplier" : "Add customer"}</DialogTitle></DialogHeader>
-          <div className="space-y-3">
-            <div className="space-y-1.5"><Label className="text-xs">Name *</Label><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></div>
-            <div className="space-y-1.5"><Label className="text-xs">Phone</Label><Input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} /></div>
-            <div className="space-y-1.5"><Label className="text-xs">Address</Label><Input value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} /></div>
-            {open === "supplier" && (
-              <div className="space-y-1.5"><Label className="text-xs">City</Label><Input value={form.city} onChange={(e) => setForm({ ...form, city: e.target.value })} /></div>
-            )}
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setOpen(null)}>Cancel</Button>
-            <Button onClick={() => void save()}>Save</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-      {/* Customer Account Statement & Detailed Ledger Modal */}
-      <Dialog open={!!statementCustomer} onOpenChange={(v) => !v && setStatementCustomer(null)}>
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="flex items-center justify-between">
-              <span>Customer Account Statement & Ledger</span>
-              <Button size="xs" variant="outline" onClick={() => statementCustomer && printReportDocument("printable-statement", `Statement_${statementCustomer.name}`)}>
-                <Printer className="mr-1.5 h-3.5 w-3.5" /> Print Statement
-              </Button>
-            </DialogTitle>
-          </DialogHeader>
-
-          {statementCustomer && (
-            <div id="printable-statement" className="space-y-4 py-2">
-              {/* Header */}
-              <div className="flex flex-wrap items-center justify-between gap-3 border-b pb-3">
-                <div>
-                  <h2 className="text-xl font-bold text-foreground">MIAN ALI TRADERS</h2>
-                  <p className="text-xs text-muted-foreground">Medical Store POS · Account Statement</p>
-                </div>
-                <div className="text-right text-xs">
-                  <p className="font-bold text-foreground">{statementCustomer.name}</p>
-                  <p className="text-muted-foreground">{statementCustomer.phone || "No Phone"}</p>
-                  <p className="text-muted-foreground">{statementCustomer.address || "Kasur / Talwandi"}</p>
-                </div>
-              </div>
-
-              {/* Summary Cards */}
-              <div className="grid grid-cols-3 gap-3">
-                <div className="rounded-md border bg-muted/30 p-2.5 text-center">
-                  <p className="text-xs text-muted-foreground">Total Billed Purchases</p>
-                  <p className="text-base font-bold text-foreground">{PKR(stats.get(statementCustomer.id)?.spent ?? 0)}</p>
-                </div>
-                <div className="rounded-md border bg-emerald-500/10 p-2.5 text-center">
-                  <p className="text-xs text-emerald-800 dark:text-emerald-300">Total Payments Deposited</p>
-                  <p className="text-base font-bold text-emerald-600">{PKR(stats.get(statementCustomer.id)?.payments ?? 0)}</p>
-                </div>
-                <div className="rounded-md border bg-card p-2.5 text-center">
-                  <p className="text-xs text-muted-foreground">Current Account Position</p>
-                  <p className="text-base font-bold">
-                    {(stats.get(statementCustomer.id)?.netBalance ?? 0) > 0 ? (
-                      <span className="text-red-600">{PKR(stats.get(statementCustomer.id)?.netBalance)} Udhaar</span>
-                    ) : (stats.get(statementCustomer.id)?.netBalance ?? 0) < 0 ? (
-                      <span className="text-emerald-600">{PKR(Math.abs(stats.get(statementCustomer.id)?.netBalance ?? 0))} Advance</span>
-                    ) : (
-                      <span className="text-muted-foreground">Clean (Rs 0)</span>
-                    )}
-                  </p>
-                </div>
-              </div>
-
-              {/* Ledger Timeline Table */}
-              <div className="rounded-md border overflow-hidden">
-                <Table>
-                  <TableHeader>
-                    <TableRow className="bg-muted/50">
-                      <TableHead>Date</TableHead>
-                      <TableHead>Ref / Invoice #</TableHead>
-                      <TableHead>Particulars & Items Purchased</TableHead>
-                      <TableHead className="text-right">Billed (+ Debit)</TableHead>
-                      <TableHead className="text-right">Paid (- Credit)</TableHead>
-                      <TableHead className="text-right">Running Balance</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {customerLedgerTimeline.map((row) => (
-                      <TableRow key={row.id} className="text-xs">
-                        <TableCell className="font-medium whitespace-nowrap">{formatDateOnly(row.date)}</TableCell>
-                        <TableCell className="font-bold">{row.refNo}</TableCell>
-                        <TableCell className="max-w-xs">{row.particulars}</TableCell>
-                        <TableCell className="text-right font-semibold text-red-600">
-                          {row.debit > 0 ? PKR(row.debit) : "—"}
-                        </TableCell>
-                        <TableCell className="text-right font-semibold text-emerald-600">
-                          {row.credit > 0 ? PKR(row.credit) : "—"}
-                        </TableCell>
-                        <TableCell className="text-right font-bold">
-                          {row.runningBalance > 0 ? (
-                            <span className="text-red-600">{PKR(row.runningBalance)} Due</span>
-                          ) : row.runningBalance < 0 ? (
-                            <span className="text-emerald-600">{PKR(Math.abs(row.runningBalance))} Adv</span>
-                          ) : (
-                            "Rs 0"
-                          )}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                    {!customerLedgerTimeline.length && (
-                      <TableRow>
-                        <TableCell colSpan={6} className="text-center text-muted-foreground py-6">
-                          No transactions found for this customer.
-                        </TableCell>
-                      </TableRow>
-                    )}
-                  </TableBody>
-                </Table>
-              </div>
-            </div>
-          )}
-
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setStatementCustomer(null)}>Close</Button>
-            <Button onClick={() => statementCustomer && printReportDocument("printable-statement", `Statement_${statementCustomer.name}`)}>
-              <Printer className="mr-2 h-4 w-4" /> Print / Save PDF
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Supplier / Vendor Account Statement & Detailed Ledger Modal */}
-      <Dialog open={!!statementSupplier} onOpenChange={(v) => !v && setStatementSupplier(null)}>
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="flex items-center justify-between">
-              <span>Supplier Account Statement & Ledger</span>
-              <Button
-                size="xs"
-                variant="outline"
-                onClick={() => statementSupplier && printReportDocument("printable-supplier-statement", `Supplier_Statement_${statementSupplier.name}`)}
-              >
-                <Printer className="mr-1.5 h-3.5 w-3.5" /> Print Statement
-              </Button>
-            </DialogTitle>
-          </DialogHeader>
-
-          {statementSupplier && (
-            <div id="printable-supplier-statement" className="space-y-4 py-2">
-              {/* Header */}
-              <div className="flex flex-wrap items-center justify-between gap-3 border-b pb-3">
-                <div>
-                  <h2 className="text-xl font-bold text-foreground">MIAN ALI TRADERS</h2>
-                  <p className="text-xs text-muted-foreground">Medical Store POS · Supplier Account Statement</p>
-                </div>
-                <div className="text-right text-xs">
-                  <p className="font-bold text-foreground">{statementSupplier.name}</p>
-                  <p className="text-muted-foreground">{statementSupplier.phone || "No Phone"}</p>
-                  <p className="text-muted-foreground">{statementSupplier.city || "Supplier / Vendor"}</p>
-                </div>
-              </div>
-
-              {/* Summary Cards */}
-              <div className="grid grid-cols-3 gap-3">
-                <div className="rounded-md border bg-muted/30 p-2.5 text-center">
-                  <p className="text-xs text-muted-foreground">Total Stock Purchased</p>
-                  <p className="text-base font-bold text-foreground">{PKR(supplierStats.get(statementSupplier.id)?.purchasedValue ?? 0)}</p>
-                </div>
-                <div className="rounded-md border bg-emerald-500/10 p-2.5 text-center">
-                  <p className="text-xs text-emerald-800 dark:text-emerald-300">Total Payments Made</p>
-                  <p className="text-base font-bold text-emerald-600">{PKR(supplierStats.get(statementSupplier.id)?.totalPaid ?? 0)}</p>
-                </div>
-                <div className="rounded-md border bg-card p-2.5 text-center">
-                  <p className="text-xs text-muted-foreground">Current Account Position</p>
-                  <p className="text-base font-bold">
-                    {(supplierStats.get(statementSupplier.id)?.payableBalance ?? 0) > 0 ? (
-                      <span className="text-red-600">{PKR(supplierStats.get(statementSupplier.id)?.payableBalance)} Payable (Dene Hain)</span>
-                    ) : (supplierStats.get(statementSupplier.id)?.payableBalance ?? 0) < 0 ? (
-                      <span className="text-emerald-600">{PKR(Math.abs(supplierStats.get(statementSupplier.id)?.payableBalance ?? 0))} Advance Diya</span>
-                    ) : (
-                      <span className="text-emerald-600">Cleared (Rs 0)</span>
-                    )}
-                  </p>
-                </div>
-              </div>
-
-              {/* Ledger Timeline Table */}
-              <div className="rounded-md border overflow-hidden">
-                <Table>
-                  <TableHeader>
-                    <TableRow className="bg-muted/50">
-                      <TableHead>Date</TableHead>
-                      <TableHead>Ref / PO #</TableHead>
-                      <TableHead>Particulars & Stock Details</TableHead>
-                      <TableHead className="text-right">Stock In (+ Payable)</TableHead>
-                      <TableHead className="text-right">Paid (- Deducted)</TableHead>
-                      <TableHead className="text-right">Running Balance</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {supplierLedgerTimeline.map((row) => (
-                      <TableRow key={row.id} className="text-xs">
-                        <TableCell className="font-medium whitespace-nowrap">{formatDateOnly(row.date)}</TableCell>
-                        <TableCell className="font-bold">{row.refNo}</TableCell>
-                        <TableCell className="max-w-xs">{row.particulars}</TableCell>
-                        <TableCell className="text-right font-semibold text-red-600">
-                          {row.debit > 0 ? PKR(row.debit) : "—"}
-                        </TableCell>
-                        <TableCell className="text-right font-semibold text-emerald-600">
-                          {row.credit > 0 ? PKR(row.credit) : "—"}
-                        </TableCell>
-                        <TableCell className="text-right font-bold">
-                          {row.runningBalance > 0 ? (
-                            <span className="text-red-600">{PKR(row.runningBalance)} Payable</span>
-                          ) : row.runningBalance < 0 ? (
-                            <span className="text-emerald-600">{PKR(Math.abs(row.runningBalance))} Advance</span>
-                          ) : (
-                            "Rs 0"
-                          )}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                    {!supplierLedgerTimeline.length && (
-                      <TableRow>
-                        <TableCell colSpan={6} className="text-center text-muted-foreground py-6">
-                          No transactions found for this supplier.
-                        </TableCell>
-                      </TableRow>
-                    )}
-                  </TableBody>
-                </Table>
-              </div>
-            </div>
-          )}
-
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setStatementSupplier(null)}>Close</Button>
-            <Button onClick={() => statementSupplier && printReportDocument("printable-supplier-statement", `Supplier_Statement_${statementSupplier.name}`)}>
-              <Printer className="mr-2 h-4 w-4" /> Print / Save PDF
             </Button>
           </DialogFooter>
         </DialogContent>

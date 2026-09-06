@@ -426,7 +426,7 @@ function PosPage() {
           <CardContent className="space-y-3">
             <div className="space-y-3">
               <div className="space-y-1.5">
-                <Label>Select Saved Customer (Optional)</Label>
+                <Label>Select Party / Customer (Optional)</Label>
                 <Select
                   value={customerId}
                   onValueChange={(val) => {

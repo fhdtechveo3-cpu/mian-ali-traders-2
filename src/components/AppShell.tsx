@@ -27,7 +27,7 @@ const NAV = [
   { to: "/inventory", label: "Inventory", icon: Boxes, admin: false },
   { to: "/sales", label: "Sales & Invoices", icon: ReceiptText, admin: false },
   { to: "/returns", label: "Returns & Refunds", icon: RotateCcw, admin: false },
-  { to: "/customers", label: "Customers", icon: Users, admin: false },
+  { to: "/customers", label: "Parties & Khata", icon: Users, admin: false },
   { to: "/analytics", label: "Analytics", icon: BarChart3, admin: false },
   { to: "/reports", label: "Reports & Excel", icon: FileSpreadsheet, admin: false },
   { to: "/notifications", label: "Notifications", icon: Bell, admin: false },
