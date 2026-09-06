@@ -1224,11 +1224,23 @@ function PartiesAndKhataPage() {
             </div>
           )}
 
-          <DialogFooter className="flex justify-between">
+          <DialogFooter className="flex flex-wrap items-center justify-between gap-2">
             <Button variant="outline" onClick={() => setSupplierVoucherModal(null)}>Close</Button>
-            <Button onClick={() => window.print()}>
-              <Printer className="mr-2 h-4 w-4" /> Print Voucher
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                onClick={() => {
+                  if (!supplierVoucherModal) return;
+                  const msg = `🧾 *MIAN ALI TRADERS — VENDOR PAYMENT VOUCHER*\n━━━━━━━━━━━━━━━━━━━━━\n👤 *Vendor / Supplier:* ${supplierVoucherModal.customerName}\n💵 *Amount Paid:* ${PKR(supplierVoucherModal.amountPaid)}\n💳 *Method:* ${supplierVoucherModal.paymentMethod}\n📅 *Date:* ${new Date(supplierVoucherModal.date).toLocaleString("en-PK")}\n📉 *Remaining Balance:* ${PKR(supplierVoucherModal.remainingDue)}\n${supplierVoucherModal.notes ? `📝 *Note:* ${supplierVoucherModal.notes}\n` : ""}━━━━━━━━━━━━━━━━━━━━━\nPayment record verified. Shukriya!\n*Mian Ali Traders*`;
+                  openWhatsAppMessage(supplierVoucherModal.customerPhone, msg);
+                }}
+              >
+                <MessageCircle className="mr-1.5 h-4 w-4" /> WhatsApp
+              </Button>
+              <Button onClick={() => printReportDocument("vendor-voucher-print", `Voucher_${supplierVoucherModal?.customerName}`)}>
+                <Printer className="mr-1.5 h-4 w-4" /> Print Voucher
+              </Button>
+            </div>
           </DialogFooter>
         </DialogContent>
       </Dialog>
