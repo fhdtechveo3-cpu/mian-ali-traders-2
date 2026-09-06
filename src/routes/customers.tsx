@@ -6,7 +6,7 @@ import { Plus, Search, Download, CreditCard, Printer, Receipt, Building2, FileTe
 import { AppShell } from "@/components/AppShell";
 import { useAuth } from "@/lib/auth";
 import { useCustomerPayments, useCustomers, useMovements, useReturns, useSaleItems, useSales, useSupplierPayments, useSuppliers } from "@/lib/queries";
-import { PKR, NUM, exportRows, formatDateOnly } from "@/lib/pos";
+import { PKR, NUM, exportRows, formatDateOnly, printReportDocument } from "@/lib/pos";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -858,7 +858,7 @@ function CustomersPage() {
           <DialogHeader>
             <DialogTitle className="flex items-center justify-between">
               <span>Customer Account Statement & Ledger</span>
-              <Button size="xs" variant="outline" onClick={() => window.print()}>
+              <Button size="xs" variant="outline" onClick={() => statementCustomer && printReportDocument("printable-statement", `Statement_${statementCustomer.name}`)}>
                 <Printer className="mr-1.5 h-3.5 w-3.5" /> Print Statement
               </Button>
             </DialogTitle>
@@ -954,7 +954,7 @@ function CustomersPage() {
 
           <DialogFooter>
             <Button variant="outline" onClick={() => setStatementCustomer(null)}>Close</Button>
-            <Button onClick={() => window.print()}>
+            <Button onClick={() => statementCustomer && printReportDocument("printable-statement", `Statement_${statementCustomer.name}`)}>
               <Printer className="mr-2 h-4 w-4" /> Print / Save PDF
             </Button>
           </DialogFooter>

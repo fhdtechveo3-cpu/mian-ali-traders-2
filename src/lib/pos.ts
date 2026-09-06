@@ -166,6 +166,124 @@ export function printThermalReceipt(elementId: string) {
   }, 250);
 }
 
+export function printReportDocument(elementId: string, title?: string) {
+  const elem = document.getElementById(elementId);
+  if (!elem) {
+    window.print();
+    return;
+  }
+
+  let iframe = document.getElementById("report-print-iframe") as HTMLIFrameElement | null;
+  if (!iframe) {
+    iframe = document.createElement("iframe");
+    iframe.id = "report-print-iframe";
+    iframe.style.position = "fixed";
+    iframe.style.right = "0";
+    iframe.style.bottom = "0";
+    iframe.style.width = "0";
+    iframe.style.height = "0";
+    iframe.style.border = "none";
+    iframe.style.zIndex = "-99999";
+    document.body.appendChild(iframe);
+  }
+
+  const doc = iframe.contentWindow?.document;
+  if (!doc) {
+    window.print();
+    return;
+  }
+
+  const clone = elem.cloneNode(true) as HTMLElement;
+  clone.querySelectorAll(".no-print, button").forEach((el) => el.remove());
+
+  doc.open();
+  doc.write(`
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <title>${title || "Account Statement"}</title>
+        <style>
+          @page {
+            size: A4 portrait;
+            margin: 12mm 12mm;
+          }
+          *, *::before, *::after {
+            box-sizing: border-box;
+          }
+          html, body {
+            margin: 0 !important;
+            padding: 0 !important;
+            background: #ffffff !important;
+            color: #000000 !important;
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
+            font-size: 11px;
+            line-height: 1.4;
+          }
+          .statement-container {
+            width: 100%;
+          }
+          table {
+            width: 100% !important;
+            border-collapse: collapse;
+            margin-top: 12px;
+          }
+          th, td {
+            border: 1px solid #d1d5db;
+            padding: 6px 8px !important;
+            font-size: 11px;
+            text-align: left;
+          }
+          th {
+            background-color: #f3f4f6 !important;
+            font-weight: 700;
+            color: #111827;
+          }
+          .text-right { text-align: right !important; }
+          .text-center { text-align: center !important; }
+          .font-bold { font-weight: bold !important; }
+          .font-semibold { font-weight: 600 !important; }
+          .font-medium { font-weight: 500 !important; }
+          .flex { display: flex; justify-content: space-between; align-items: flex-start; }
+          .grid { display: grid; }
+          .grid-cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+          .rounded-md { border-radius: 6px; }
+          .border { border: 1px solid #e5e7eb; }
+          .border-b { border-bottom: 1px solid #e5e7eb; }
+          .pb-3 { padding-bottom: 12px; }
+          .py-2 { padding-top: 8px; padding-bottom: 8px; }
+          .p-2\\.5 { padding: 10px; }
+          .text-xs { font-size: 10px; }
+          .text-sm { font-size: 12px; }
+          .text-base { font-size: 14px; }
+          .text-xl { font-size: 18px; }
+          .text-muted-foreground { color: #4b5563 !important; }
+          .text-foreground { color: #111827 !important; }
+          .text-emerald-600 { color: #059669 !important; }
+          .text-red-600 { color: #dc2626 !important; }
+          .bg-muted\\/30 { background-color: #f9fafb !important; }
+          .bg-emerald-500\\/10 { background-color: #ecfdf5 !important; }
+          .bg-card { background-color: #ffffff !important; }
+          .bg-muted\\/50 { background-color: #f3f4f6 !important; }
+          .whitespace-nowrap { white-space: nowrap; }
+          .max-w-xs { max-width: 250px; }
+          .no-print { display: none !important; }
+        </style>
+      </head>
+      <body>
+        <div class="statement-container">
+          ${clone.innerHTML}
+        </div>
+      </body>
+    </html>
+  `);
+  doc.close();
+
+  setTimeout(() => {
+    iframe?.contentWindow?.focus();
+    iframe?.contentWindow?.print();
+  }, 250);
+}
+
 export function exportRows(rows: Record<string, unknown>[], fileName: string, format: "xlsx" | "csv" = "xlsx") {
   const ws = XLSX.utils.json_to_sheet(rows.length ? rows : [{ info: "No data" }]);
   const wb = XLSX.utils.book_new();
