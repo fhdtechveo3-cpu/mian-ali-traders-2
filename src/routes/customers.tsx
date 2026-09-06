@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { Plus, Search, Download, CreditCard, Printer, Receipt, Building2, FileText } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { useAuth } from "@/lib/auth";
-import { useCustomerPayments, useCustomers, useMovements, useReturns, useSaleItems, useSales, useSupplierPayments, useSuppliers } from "@/lib/queries";
+import { useCustomerPayments, useCustomers, useMovements, useProducts, useReturns, useSaleItems, useSales, useSupplierPayments, useSuppliers } from "@/lib/queries";
 import { PKR, NUM, exportRows, formatDateOnly, printReportDocument } from "@/lib/pos";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent } from "@/components/ui/card";
@@ -52,6 +52,7 @@ function CustomersPage() {
   const { data: saleItems = [] } = useSaleItems();
   const { data: movements = [] } = useMovements("all");
   const { data: supplierPayments = [] } = useSupplierPayments();
+  const { data: products = [] } = useProducts("all");
 
   const [term, setTerm] = useState("");
   const [open, setOpen] = useState<"customer" | "supplier" | null>(null);
@@ -65,6 +66,7 @@ function CustomersPage() {
 
   // Statement Modal State
   const [statementCustomer, setStatementCustomer] = useState<(typeof customers)[0] | null>(null);
+  const [statementSupplier, setStatementSupplier] = useState<(typeof suppliers)[0] | null>(null);
 
   // Vendor / Supplier Payment Dialog states
   const [selectedPaySupplier, setSelectedPaySupplier] = useState<(typeof suppliers)[0] | null>(null);
@@ -135,6 +137,65 @@ function CustomersPage() {
 
     return timeline;
   }, [statementCustomer, sales, customerPayments, saleItems]);
+
+  const supplierLedgerTimeline = useMemo(() => {
+    if (!statementSupplier) return [];
+    const sId = statementSupplier.id;
+
+    const supMovements = movements.filter((m) => m.supplier_id === sId && m.movement_type === "purchase");
+    const supPayments = supplierPayments.filter((p) => p.supplier_id === sId);
+
+    const prodMap = new Map(products.map((p) => [p.id, p.name]));
+
+    const timeline: Array<{
+      id: string;
+      date: string;
+      type: "purchase" | "payment";
+      refNo: string;
+      particulars: string;
+      debit: number;
+      credit: number;
+      runningBalance: number;
+    }> = [];
+
+    supMovements.forEach((m) => {
+      const prodName = prodMap.get(m.product_id) || "Stock Purchase";
+      const cost = Number(m.quantity) * (Number(m.purchase_price) || 0);
+      timeline.push({
+        id: `mov-${m.id}`,
+        date: m.created_at,
+        type: "purchase",
+        refNo: m.reference || "PO-Stock",
+        particulars: `${prodName} (${NUM(m.quantity)} Qty @ Rs ${NUM(m.purchase_price || 0)})${m.note ? ` · ${m.note}` : ""}`,
+        debit: cost,
+        credit: 0,
+        runningBalance: 0,
+      });
+    });
+
+    supPayments.forEach((p) => {
+      timeline.push({
+        id: `pay-${p.id}`,
+        date: p.created_at,
+        type: "payment",
+        refNo: "PAY-VOUCHER",
+        particulars: `Payment via ${p.payment_method}${p.note ? ` (${p.note})` : ""}`,
+        debit: 0,
+        credit: Number(p.amount),
+        runningBalance: 0,
+      });
+    });
+
+    timeline.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+    let running = 0;
+    timeline.forEach((row) => {
+      running += row.debit - row.credit;
+      row.runningBalance = running;
+    });
+
+    return timeline;
+  }, [statementSupplier, movements, supplierPayments, products]);
 
   const refundedBySaleMap = useMemo(() => {
     const map = new Map<string, number>();
@@ -591,7 +652,15 @@ function CustomersPage() {
                           <span className="text-emerald-600 font-semibold">Cleared (Rs 0)</span>
                         )}
                       </TableCell>
-                      <TableCell className="text-right">
+                      <TableCell className="text-right flex items-center justify-end gap-1.5">
+                        <Button
+                          size="xs"
+                          variant="outline"
+                          onClick={() => setStatementSupplier(s)}
+                          title="View Supplier Account Statement & Ledger"
+                        >
+                          <FileText className="mr-1 h-3.5 w-3.5" /> Statement
+                        </Button>
                         <Button
                           size="xs"
                           className="bg-primary hover:bg-primary/90 text-white"
@@ -955,6 +1024,119 @@ function CustomersPage() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setStatementCustomer(null)}>Close</Button>
             <Button onClick={() => statementCustomer && printReportDocument("printable-statement", `Statement_${statementCustomer.name}`)}>
+              <Printer className="mr-2 h-4 w-4" /> Print / Save PDF
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Supplier / Vendor Account Statement & Detailed Ledger Modal */}
+      <Dialog open={!!statementSupplier} onOpenChange={(v) => !v && setStatementSupplier(null)}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center justify-between">
+              <span>Supplier Account Statement & Ledger</span>
+              <Button
+                size="xs"
+                variant="outline"
+                onClick={() => statementSupplier && printReportDocument("printable-supplier-statement", `Supplier_Statement_${statementSupplier.name}`)}
+              >
+                <Printer className="mr-1.5 h-3.5 w-3.5" /> Print Statement
+              </Button>
+            </DialogTitle>
+          </DialogHeader>
+
+          {statementSupplier && (
+            <div id="printable-supplier-statement" className="space-y-4 py-2">
+              {/* Header */}
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b pb-3">
+                <div>
+                  <h2 className="text-xl font-bold text-foreground">MIAN ALI TRADERS</h2>
+                  <p className="text-xs text-muted-foreground">Medical Store POS · Supplier Account Statement</p>
+                </div>
+                <div className="text-right text-xs">
+                  <p className="font-bold text-foreground">{statementSupplier.name}</p>
+                  <p className="text-muted-foreground">{statementSupplier.phone || "No Phone"}</p>
+                  <p className="text-muted-foreground">{statementSupplier.city || "Supplier / Vendor"}</p>
+                </div>
+              </div>
+
+              {/* Summary Cards */}
+              <div className="grid grid-cols-3 gap-3">
+                <div className="rounded-md border bg-muted/30 p-2.5 text-center">
+                  <p className="text-xs text-muted-foreground">Total Stock Purchased</p>
+                  <p className="text-base font-bold text-foreground">{PKR(supplierStats.get(statementSupplier.id)?.purchasedValue ?? 0)}</p>
+                </div>
+                <div className="rounded-md border bg-emerald-500/10 p-2.5 text-center">
+                  <p className="text-xs text-emerald-800 dark:text-emerald-300">Total Payments Made</p>
+                  <p className="text-base font-bold text-emerald-600">{PKR(supplierStats.get(statementSupplier.id)?.totalPaid ?? 0)}</p>
+                </div>
+                <div className="rounded-md border bg-card p-2.5 text-center">
+                  <p className="text-xs text-muted-foreground">Current Account Position</p>
+                  <p className="text-base font-bold">
+                    {(supplierStats.get(statementSupplier.id)?.payableBalance ?? 0) > 0 ? (
+                      <span className="text-red-600">{PKR(supplierStats.get(statementSupplier.id)?.payableBalance)} Payable (Dene Hain)</span>
+                    ) : (supplierStats.get(statementSupplier.id)?.payableBalance ?? 0) < 0 ? (
+                      <span className="text-emerald-600">{PKR(Math.abs(supplierStats.get(statementSupplier.id)?.payableBalance ?? 0))} Advance Diya</span>
+                    ) : (
+                      <span className="text-emerald-600">Cleared (Rs 0)</span>
+                    )}
+                  </p>
+                </div>
+              </div>
+
+              {/* Ledger Timeline Table */}
+              <div className="rounded-md border overflow-hidden">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-muted/50">
+                      <TableHead>Date</TableHead>
+                      <TableHead>Ref / PO #</TableHead>
+                      <TableHead>Particulars & Stock Details</TableHead>
+                      <TableHead className="text-right">Stock In (+ Payable)</TableHead>
+                      <TableHead className="text-right">Paid (- Deducted)</TableHead>
+                      <TableHead className="text-right">Running Balance</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {supplierLedgerTimeline.map((row) => (
+                      <TableRow key={row.id} className="text-xs">
+                        <TableCell className="font-medium whitespace-nowrap">{formatDateOnly(row.date)}</TableCell>
+                        <TableCell className="font-bold">{row.refNo}</TableCell>
+                        <TableCell className="max-w-xs">{row.particulars}</TableCell>
+                        <TableCell className="text-right font-semibold text-red-600">
+                          {row.debit > 0 ? PKR(row.debit) : "—"}
+                        </TableCell>
+                        <TableCell className="text-right font-semibold text-emerald-600">
+                          {row.credit > 0 ? PKR(row.credit) : "—"}
+                        </TableCell>
+                        <TableCell className="text-right font-bold">
+                          {row.runningBalance > 0 ? (
+                            <span className="text-red-600">{PKR(row.runningBalance)} Payable</span>
+                          ) : row.runningBalance < 0 ? (
+                            <span className="text-emerald-600">{PKR(Math.abs(row.runningBalance))} Advance</span>
+                          ) : (
+                            "Rs 0"
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                    {!supplierLedgerTimeline.length && (
+                      <TableRow>
+                        <TableCell colSpan={6} className="text-center text-muted-foreground py-6">
+                          No transactions found for this supplier.
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setStatementSupplier(null)}>Close</Button>
+            <Button onClick={() => statementSupplier && printReportDocument("printable-supplier-statement", `Supplier_Statement_${statementSupplier.name}`)}>
               <Printer className="mr-2 h-4 w-4" /> Print / Save PDF
             </Button>
           </DialogFooter>
