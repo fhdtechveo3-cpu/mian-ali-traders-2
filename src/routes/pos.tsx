@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
-import { Minus, Plus, Search, Trash2, Printer, Lock } from "lucide-react";
+import { Minus, Plus, Search, Trash2, Printer, Lock, MessageCircle } from "lucide-react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
 import { useAuth } from "@/lib/auth";
 import { useCustomers, useProducts, useProductBatches } from "@/lib/queries";
-import { PKR, NUM, daysToExpiry, formatDateOnly, printThermalReceipt, type Product } from "@/lib/pos";
+import { PKR, NUM, daysToExpiry, formatDateOnly, printThermalReceipt, openWhatsAppMessage, type Product } from "@/lib/pos";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -542,6 +542,40 @@ function PosPage() {
   );
 }
 
+function sendInvoiceWhatsApp(r: Receipt) {
+  const dateStr = new Date(r.date).toLocaleString("en-PK", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
+
+  let msg = `🧾 *MIAN ALI TRADERS*\n`;
+  if (r.branch) msg += `📍 *Branch:* ${r.branch}\n`;
+  msg += `📄 *Invoice #:* ${r.invoice}\n`;
+  msg += `👤 *Customer:* ${r.customer}\n`;
+  msg += `📅 *Date:* ${dateStr}\n`;
+  msg += `━━━━━━━━━━━━━━━━━━━━━\n`;
+  msg += `*Items:*\n`;
+  r.lines.forEach((l) => {
+    msg += `• ${l.name} × ${NUM(l.quantity)} = ${PKR(l.quantity * l.price)}\n`;
+  });
+  msg += `━━━━━━━━━━━━━━━━━━━━━\n`;
+  msg += `💰 *Subtotal:* ${PKR(r.subtotal)}\n`;
+  if (r.discount > 0) msg += `🏷️ *Discount:* ${PKR(r.discount)}\n`;
+  msg += `💵 *Grand Total:* ${PKR(r.total)}\n`;
+  msg += `💳 *Paid Amount:* ${PKR(r.paid)} (${r.method})\n`;
+  if (r.remaining > 0) {
+    msg += `⚠️ *Total Udhaar Due:* ${PKR(r.remaining)}\n`;
+    if (r.dueDate) {
+      msg += `🗓️ *Promised Due Date:* ${formatDateOnly(r.dueDate)}\n`;
+    }
+  }
+  if (r.notes) msg += `📝 *Note:* ${r.notes}\n`;
+  msg += `━━━━━━━━━━━━━━━━━━━━━\n`;
+  msg += `Shukriya! Mian Ali Traders.`;
+
+  openWhatsAppMessage(r.phone, msg);
+}
+
 function ReceiptDialog({ receipt, onClose }: { receipt: Receipt | null; onClose: () => void }) {
   useEffect(() => {
     if (!receipt) return;
@@ -619,9 +653,15 @@ function ReceiptDialog({ receipt, onClose }: { receipt: Receipt | null; onClose:
               </div>
             )}
 
-            <div className="no-print grid grid-cols-2 gap-2 pt-1">
+            <div className="no-print grid grid-cols-3 gap-2 pt-1">
               <Button onClick={() => printThermalReceipt("invoice-print")}>
-                <Printer className="mr-2 h-4 w-4" /> Print
+                <Printer className="mr-1 h-3.5 w-3.5" /> Print
+              </Button>
+              <Button
+                className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                onClick={() => sendInvoiceWhatsApp(receipt)}
+              >
+                <MessageCircle className="mr-1 h-3.5 w-3.5" /> WhatsApp
               </Button>
               <Button variant="outline" onClick={onClose}>
                 Close

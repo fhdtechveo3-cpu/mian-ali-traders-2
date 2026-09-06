@@ -2,11 +2,11 @@ import { useMemo, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Plus, Search, Download, CreditCard, Printer, Receipt, Building2, FileText, Pencil, Users } from "lucide-react";
+import { Plus, Search, Download, CreditCard, Printer, Receipt, Building2, FileText, Pencil, Users, MessageCircle } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { useAuth } from "@/lib/auth";
 import { useCustomerPayments, useCustomers, useMovements, useProducts, useReturns, useSaleItems, useSales, useSupplierPayments, useSuppliers } from "@/lib/queries";
-import { PKR, NUM, exportRows, formatDateOnly, printReportDocument } from "@/lib/pos";
+import { PKR, NUM, exportRows, formatDateOnly, printReportDocument, openWhatsAppMessage } from "@/lib/pos";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -356,6 +356,80 @@ function PartiesAndKhataPage() {
     return timeline;
   }, [statementParty, sales, customerPayments, movements, supplierPayments, saleItems, products]);
 
+  const sharePartyStatementWhatsApp = (party: Party) => {
+    const st = partyStats.get(party.id);
+    const netBal = st?.netKhataBalance ?? 0;
+    const salesVal = st?.salesBilled ?? 0;
+    const purchVal = st?.purchasedValue ?? 0;
+    const salesPaid = st?.salesPaid ?? 0;
+    const purchasesPaid = st?.purchasesPaid ?? 0;
+
+    let balanceText = "🟢 *Hisaab Barabar Hai (Rs 0)*";
+    if (netBal > 0) {
+      balanceText = `🔴 *Aapki Taraf Baqaya (Lene Hain):* ${PKR(netBal)}`;
+    } else if (netBal < 0) {
+      balanceText = `🔵 *Hamari Taraf Baqaya (Dene Hain):* ${PKR(Math.abs(netBal))}`;
+    }
+
+    const todayStr = new Date().toLocaleDateString("en-GB");
+
+    let msg = `🏥 *MIAN ALI TRADERS — KHATA STATEMENT*\n`;
+    msg += `━━━━━━━━━━━━━━━━━━━━━\n`;
+    msg += `👤 *Party / Khata:* ${party.name}\n`;
+    if (party.city) msg += `📍 *City:* ${party.city}\n`;
+    if (party.phone) msg += `📞 *Phone:* ${party.phone}\n`;
+    msg += `📅 *Date:* ${todayStr}\n\n`;
+
+    msg += `📦 *Sales (Maal Baicha):* ${PKR(salesVal)}\n`;
+    msg += `📥 *Payments Received:* ${PKR(salesPaid)}\n`;
+    msg += `🚚 *Purchases (Maal Khareeda):* ${PKR(purchVal)}\n`;
+    msg += `📤 *Payments Made:* ${PKR(purchasesPaid)}\n`;
+    msg += `━━━━━━━━━━━━━━━━━━━━━\n`;
+    msg += `⚖️ *NET POSITION (صاف کھاتہ):*\n${balanceText}\n`;
+    if (st?.earliestDueDate && netBal > 0) {
+      msg += `🗓️ *Promised Due Date:* ${formatDateOnly(st.earliestDueDate)}\n`;
+    }
+    msg += `━━━━━━━━━━━━━━━━━━━━━\n`;
+    msg += `Tafseeli hisaab ya kisi ghalti ki soorat me foran rabta farmayein.\n`;
+    msg += `*Mian Ali Traders, Kasur*`;
+
+    openWhatsAppMessage(party.phone, msg);
+  };
+
+  const sendQuickWhatsAppReminder = (party: Party) => {
+    const st = partyStats.get(party.id);
+    const netBal = st?.netKhataBalance ?? 0;
+    if (netBal <= 0) {
+      toast.info("Is party ka koi baqaya udhaar nahi hai.");
+      return;
+    }
+    let msg = `Assalam-o-Alaikum *${party.name}* Sahab!\n\n`;
+    msg += `Mian Ali Traders ki taraf se aapka baqaya udhaar *${PKR(netBal)}* hai.\n`;
+    if (st?.earliestDueDate) {
+      msg += `Aapki promised date *${formatDateOnly(st.earliestDueDate)}* thi.\n`;
+    }
+    msg += `Baraye meharbani baqaya raqam jald az jald ada farma kar shukriya ka moqa dein.\n\n`;
+    msg += `*Mian Ali Traders, Kasur*`;
+
+    openWhatsAppMessage(party.phone, msg);
+  };
+
+  const sharePaymentReceiptWhatsApp = (r: NonNullable<typeof receiptModal>) => {
+    let msg = `🧾 *MIAN ALI TRADERS — PAYMENT RECEIPT*\n`;
+    msg += `━━━━━━━━━━━━━━━━━━━━━\n`;
+    msg += `👤 *Customer / Party:* ${r.customerName}\n`;
+    msg += `💵 *Payment Received:* ${PKR(r.amountPaid)}\n`;
+    msg += `💳 *Method:* ${r.paymentMethod}\n`;
+    msg += `📅 *Date:* ${new Date(r.date).toLocaleString("en-PK")}\n`;
+    msg += `📉 *Remaining Udhaar Due:* ${PKR(r.remainingDue)}\n`;
+    if (r.notes) msg += `📝 *Note:* ${r.notes}\n`;
+    msg += `━━━━━━━━━━━━━━━━━━━━━\n`;
+    msg += `Aapki adaigi wasool paayi gayi. Shukriya!\n`;
+    msg += `*Mian Ali Traders*`;
+
+    openWhatsAppMessage(r.customerPhone, msg);
+  };
+
   // Save Party (Creates both customer and supplier entries with identical UUID)
   const saveParty = async () => {
     if (!partyForm.name.trim()) {
@@ -571,6 +645,16 @@ function PartiesAndKhataPage() {
                         title="View 360° Complete Khata Statement"
                       >
                         <FileText className="mr-1 h-3.5 w-3.5 text-primary" /> Statement
+                      </Button>
+
+                      <Button
+                        size="xs"
+                        variant="ghost"
+                        className="h-7 w-7 p-0 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/30"
+                        title={netBal > 0 ? "Send WhatsApp Udhaar Reminder" : "Share Khata on WhatsApp"}
+                        onClick={() => (netBal > 0 ? sendQuickWhatsAppReminder(p) : sharePartyStatementWhatsApp(p))}
+                      >
+                        <MessageCircle className="h-3.5 w-3.5" />
                       </Button>
 
                       {netBal > 0 ? (
@@ -902,11 +986,19 @@ function PartiesAndKhataPage() {
             </div>
           )}
 
-          <DialogFooter>
+          <DialogFooter className="flex flex-wrap items-center justify-between gap-2">
             <Button variant="outline" onClick={() => setStatementParty(null)}>Close</Button>
-            <Button onClick={() => statementParty && printReportDocument("printable-party-statement", `Statement_${statementParty.name}`)}>
-              <Printer className="mr-2 h-4 w-4" /> Print / Save PDF
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                onClick={() => statementParty && sharePartyStatementWhatsApp(statementParty)}
+              >
+                <MessageCircle className="mr-2 h-4 w-4" /> Share on WhatsApp
+              </Button>
+              <Button onClick={() => statementParty && printReportDocument("printable-party-statement", `Statement_${statementParty.name}`)}>
+                <Printer className="mr-2 h-4 w-4" /> Print / Save PDF
+              </Button>
+            </div>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -1013,11 +1105,19 @@ function PartiesAndKhataPage() {
             </div>
           )}
 
-          <DialogFooter className="flex justify-between">
+          <DialogFooter className="flex flex-wrap items-center justify-between gap-2">
             <Button variant="outline" onClick={() => setReceiptModal(null)}>Close</Button>
-            <Button onClick={() => window.print()}>
-              <Printer className="mr-2 h-4 w-4" /> Print Receipt
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                onClick={() => receiptModal && sharePaymentReceiptWhatsApp(receiptModal)}
+              >
+                <MessageCircle className="mr-1.5 h-4 w-4" /> WhatsApp
+              </Button>
+              <Button onClick={() => printReportDocument("udhaar-receipt-print", `Receipt_${receiptModal?.customerName}`)}>
+                <Printer className="mr-1.5 h-4 w-4" /> Print Receipt
+              </Button>
+            </div>
           </DialogFooter>
         </DialogContent>
       </Dialog>

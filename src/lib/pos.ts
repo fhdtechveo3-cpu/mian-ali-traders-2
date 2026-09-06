@@ -61,6 +61,32 @@ export const formatDateOnly = (dateStr?: string | null): string => {
   return dateStr;
 };
 
+export const formatPakistaniPhone = (phone?: string | null): string => {
+  if (!phone) return "";
+  let clean = phone.replace(/[^0-9]/g, "");
+  if (clean.startsWith("0092")) {
+    clean = clean.slice(2);
+  } else if (clean.startsWith("+92")) {
+    clean = clean.slice(1);
+  } else if (clean.startsWith("03")) {
+    clean = "92" + clean.slice(1);
+  } else if (clean.startsWith("3") && clean.length === 10) {
+    clean = "92" + clean;
+  }
+  return clean;
+};
+
+export const openWhatsAppMessage = (phone: string | null | undefined, message: string) => {
+  let targetPhone = formatPakistaniPhone(phone);
+  if (!targetPhone) {
+    const inputPhone = window.prompt("Baraye meharbani WhatsApp number darj karein (e.g. 03001234567):");
+    if (!inputPhone) return;
+    targetPhone = formatPakistaniPhone(inputPhone);
+  }
+  const url = `https://wa.me/${targetPhone}?text=${encodeURIComponent(message)}`;
+  window.open(url, "_blank", "noopener,noreferrer");
+};
+
 export function printThermalReceipt(elementId: string) {
   const elem = document.getElementById(elementId);
   if (!elem) {
