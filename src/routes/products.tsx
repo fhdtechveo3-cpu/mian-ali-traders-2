@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
 import { useAuth } from "@/lib/auth";
 import { useMovements, useProducts, useProductBatches, useReturns, useSaleItems, useSuppliers } from "@/lib/queries";
-import { PKR, NUM, exportRows, readSheet, stockStatus, type Product } from "@/lib/pos";
+import { PKR, NUM, exportRows, formatDateOnly, readSheet, stockStatus, type Product } from "@/lib/pos";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -68,6 +68,24 @@ function ProductsPage() {
 
   const categories = Array.from(new Set(products.map((p) => p.category).filter(Boolean))) as string[];
 
+  const batchesByProduct = useMemo(() => {
+    const map = new Map<string, typeof batches>();
+    batches.forEach((b) => {
+      if (Number(b.stock_quantity) <= 0) return;
+      const list = map.get(b.product_id) || [];
+      list.push(b);
+      map.set(b.product_id, list);
+    });
+    map.forEach((list) => {
+      list.sort((a, b) => {
+        if (!a.expiry_date) return 1;
+        if (!b.expiry_date) return -1;
+        return new Date(a.expiry_date).getTime() - new Date(b.expiry_date).getTime();
+      });
+    });
+    return map;
+  }, [batches]);
+
   const filtered = useMemo(() => {
     const t = term.trim().toLowerCase();
     return products.filter((p) => {
@@ -124,16 +142,36 @@ function ProductsPage() {
       supplier_id: form.supplier_id || null,
       notes: form.notes || null,
     };
-    const { error } = editId
-      ? await supabase.from("products").update(payload).eq("id", editId)
-      : await supabase.from("products").insert(payload);
-    if (error) {
-      toast.error(error.message);
-      return;
+    let createdProdId: string | null = null;
+    if (editId) {
+      const { error } = await supabase.from("products").update(payload).eq("id", editId);
+      if (error) {
+        toast.error(error.message);
+        return;
+      }
+    } else {
+      const { data: inserted, error } = await supabase.from("products").insert(payload).select().single();
+      if (error) {
+        toast.error(error.message);
+        return;
+      }
+      createdProdId = inserted?.id ?? null;
+      if (createdProdId && Number(payload.stock_quantity) > 0) {
+        await supabase.from("product_batches").insert({
+          product_id: createdProdId,
+          branch_id: payload.branch_id,
+          batch_number: payload.batch_number || ("B-" + Math.floor(Math.random() * 90000 + 10000)),
+          expiry_date: payload.expiry_date || null,
+          purchase_price: Number(payload.purchase_price) || 0,
+          selling_price: Number(payload.selling_price) || 0,
+          stock_quantity: Number(payload.stock_quantity),
+        });
+      }
     }
     toast.success(editId ? "Product updated" : "Product added");
     setOpen(false);
     void qc.invalidateQueries({ queryKey: ["products"] });
+    void qc.invalidateQueries({ queryKey: ["product_batches"] });
   };
 
   const remove = async (id: string) => {
@@ -304,6 +342,7 @@ function ProductsPage() {
               <TableBody>
                 {filtered.map((p) => {
                   const st = stockStatus(p);
+                  const prodBatches = batchesByProduct.get(p.id) || [];
                   return (
                     <TableRow key={p.id}>
                       <TableCell>
@@ -315,11 +354,56 @@ function ProductsPage() {
                       <TableCell className="text-right text-sm">{PKR(p.purchase_price)}</TableCell>
                       <TableCell className="text-right text-sm font-medium">{PKR(p.selling_price)}</TableCell>
                       <TableCell className="text-right">
-                        <Badge variant={st === "out" ? "destructive" : st === "low" ? "secondary" : "outline"}>
-                          {NUM(p.stock_quantity)} {p.unit}
-                        </Badge>
+                        <div className="flex flex-col items-end gap-1">
+                          <Badge variant={st === "out" ? "destructive" : st === "low" ? "secondary" : "outline"} className="font-bold">
+                            {NUM(p.stock_quantity)} {p.unit}
+                          </Badge>
+                          {prodBatches.length > 1 && (
+                            <div className="flex flex-col items-end gap-0.5 mt-0.5 border-t border-border/40 pt-1 text-[10px]">
+                              {prodBatches.map((b, idx) => {
+                                const isOldest = idx === 0;
+                                const isNewest = idx === prodBatches.length - 1;
+                                const label = isOldest ? "Old Exp" : isNewest ? "New Exp" : `Batch ${idx + 1}`;
+                                return (
+                                  <div key={b.id} className="flex items-center justify-between gap-1.5 whitespace-nowrap">
+                                    <span className={isOldest ? "text-amber-600 dark:text-amber-400 font-medium" : "text-emerald-600 dark:text-emerald-400 font-medium"}>
+                                      {isOldest ? "⏳" : "🟢"} {label}:
+                                    </span>
+                                    <strong className="text-foreground">{NUM(b.stock_quantity)} {p.unit}</strong>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
                       </TableCell>
-                      <TableCell className="text-sm">{p.expiry_date ?? "—"}</TableCell>
+                      <TableCell className="text-sm">
+                        {prodBatches.length > 1 ? (
+                          <div className="flex flex-col gap-1 min-w-[125px]">
+                            {prodBatches.map((b, idx) => {
+                              const isOldest = idx === 0;
+                              const isNewest = idx === prodBatches.length - 1;
+                              const label = isOldest ? "Old" : isNewest ? "New" : `B${idx + 1}`;
+                              return (
+                                <Badge
+                                  key={b.id}
+                                  variant="outline"
+                                  className={`text-[10px] px-1.5 py-0.5 justify-between gap-1 whitespace-nowrap font-medium ${
+                                    isOldest
+                                      ? "border-amber-500/50 bg-amber-50 text-amber-900 dark:bg-amber-950/30 dark:text-amber-200"
+                                      : "border-emerald-500/50 bg-emerald-50 text-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-200"
+                                  }`}
+                                >
+                                  <span>{isOldest ? "⏳ " : "🟢 "}{label}: {formatDateOnly(b.expiry_date)}</span>
+                                  <span className="font-bold">({NUM(b.stock_quantity)})</span>
+                                </Badge>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <span className="text-sm">{p.expiry_date ? formatDateOnly(p.expiry_date) : "—"}</span>
+                        )}
+                      </TableCell>
                       <TableCell className="text-xs">{branches.find((b) => b.id === p.branch_id)?.city ?? "—"}</TableCell>
                       <TableCell className="text-right">
                         <Button size="icon" variant="ghost" className="h-8 w-8" title="Product Stock Ledger" onClick={() => setHistoryProduct(p)}>
@@ -442,6 +526,52 @@ function ProductsPage() {
                     <p className="text-lg font-bold text-foreground">{NUM(historyProduct.stock_quantity)} {historyProduct.unit}</p>
                   </div>
                 </div>
+
+                {/* Active Batches Breakdown in History Modal */}
+                {(() => {
+                  const prodBatches = (batchesByProduct.get(pId) || []);
+                  if (!prodBatches.length) return null;
+                  return (
+                    <div className="rounded-md border p-3 bg-muted/20 space-y-2">
+                      <p className="text-xs font-semibold text-foreground flex items-center justify-between">
+                        <span>📦 Expiry-wise Stock Breakdown ({prodBatches.length} {prodBatches.length === 1 ? "Batch" : "Batches"} Available)</span>
+                        <span className="text-[11px] text-muted-foreground font-normal">FIFO / FEFO Tracking</span>
+                      </p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        {prodBatches.map((b, idx) => {
+                          const isOldest = idx === 0;
+                          const isNewest = idx === prodBatches.length - 1;
+                          const label = isOldest ? "Old Expiry Stock" : isNewest ? "New Expiry Stock" : `Batch ${idx + 1}`;
+                          return (
+                            <div
+                              key={b.id}
+                              className={`flex items-center justify-between p-2 rounded border text-xs ${
+                                isOldest
+                                  ? "border-amber-500/40 bg-amber-500/5 dark:bg-amber-950/20"
+                                  : "border-emerald-500/40 bg-emerald-500/5 dark:bg-emerald-950/20"
+                              }`}
+                            >
+                              <div>
+                                <span className={`font-bold ${isOldest ? "text-amber-700 dark:text-amber-400" : "text-emerald-700 dark:text-emerald-400"}`}>
+                                  {isOldest ? "⏳ " : "🟢 "}{label}
+                                </span>
+                                <p className="text-[11px] text-muted-foreground mt-0.5">
+                                  {b.batch_number ? `Batch: ${b.batch_number} · ` : ""}Exp: {formatDateOnly(b.expiry_date)}
+                                </p>
+                              </div>
+                              <Badge
+                                variant="outline"
+                                className={`font-bold ${isOldest ? "border-amber-500 text-amber-700" : "border-emerald-500 text-emerald-700"}`}
+                              >
+                                {NUM(b.stock_quantity)} {historyProduct.unit}
+                              </Badge>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })()}
 
                 <div className="rounded-md border overflow-x-auto">
                   <Table>

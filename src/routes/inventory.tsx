@@ -7,7 +7,7 @@ import { AppShell } from "@/components/AppShell";
 import { StatCard } from "@/components/StatCard";
 import { useAuth } from "@/lib/auth";
 import { useMovements, useProducts, useProductBatches, useReturns, useSaleItems, useStockTransfers, useSuppliers } from "@/lib/queries";
-import { PKR, NUM, exportRows, daysToExpiry, stockStatus, type Product } from "@/lib/pos";
+import { PKR, NUM, exportRows, daysToExpiry, formatDateOnly, stockStatus, type Product } from "@/lib/pos";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -52,6 +52,24 @@ function InventoryPage() {
   const [note, setNote] = useState("");
 
   const { data: batches = [] } = useProductBatches(activeBranch);
+
+  const batchesByProduct = useMemo(() => {
+    const map = new Map<string, typeof batches>();
+    batches.forEach((b) => {
+      if (Number(b.stock_quantity) <= 0) return;
+      const list = map.get(b.product_id) || [];
+      list.push(b);
+      map.set(b.product_id, list);
+    });
+    map.forEach((list) => {
+      list.sort((a, b) => {
+        if (!a.expiry_date) return 1;
+        if (!b.expiry_date) return -1;
+        return new Date(a.expiry_date).getTime() - new Date(b.expiry_date).getTime();
+      });
+    });
+    return map;
+  }, [batches]);
 
   // Adjustment states
   const [selectedAdjustProduct, setSelectedAdjustProduct] = useState<Product | null>(null);
@@ -634,25 +652,54 @@ function InventoryPage() {
                 <TableHead className="text-right">Retail value</TableHead><TableHead>Status</TableHead><TableHead />
               </TableRow></TableHeader>
               <TableBody>
-                {products.map((p) => (
-                  <TableRow key={p.id}>
-                    <TableCell className="font-medium">{p.name}</TableCell>
-                    <TableCell className="text-xs">{branches.find((b) => b.id === p.branch_id)?.city}</TableCell>
-                    <TableCell className="text-right">{NUM(p.stock_quantity)} {p.unit}</TableCell>
-                    <TableCell className="text-right">{PKR(Number(p.purchase_price) * Number(p.stock_quantity))}</TableCell>
-                    <TableCell className="text-right">{PKR(Number(p.selling_price) * Number(p.stock_quantity))}</TableCell>
-                    <TableCell>
-                      <Badge variant={stockStatus(p) === "out" ? "destructive" : stockStatus(p) === "low" ? "secondary" : "outline"}>
-                        {stockStatus(p) === "out" ? "Out of stock" : stockStatus(p) === "low" ? "Low" : "In stock"}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <Button size="sm" variant="ghost" onClick={() => setHistoryProduct(p)}>
-                        <History className="mr-1 h-3.5 w-3.5 text-primary" /> History
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
+                {products.map((p) => {
+                  const prodBatches = batchesByProduct.get(p.id) || [];
+                  return (
+                    <TableRow key={p.id}>
+                      <TableCell className="font-medium">
+                        {p.name}
+                        {p.generic_name && <p className="text-[11px] text-muted-foreground font-normal">{p.generic_name}</p>}
+                      </TableCell>
+                      <TableCell className="text-xs">{branches.find((b) => b.id === p.branch_id)?.city}</TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex flex-col items-end gap-1">
+                          <Badge variant={stockStatus(p) === "out" ? "destructive" : stockStatus(p) === "low" ? "secondary" : "outline"} className="font-bold">
+                            {NUM(p.stock_quantity)} {p.unit}
+                          </Badge>
+                          {prodBatches.length > 1 && (
+                            <div className="flex flex-col items-end gap-0.5 mt-0.5 border-t border-border/40 pt-1 text-[10px]">
+                              {prodBatches.map((b, idx) => {
+                                const isOldest = idx === 0;
+                                const isNewest = idx === prodBatches.length - 1;
+                                const label = isOldest ? "Old Exp" : isNewest ? "New Exp" : `Batch ${idx + 1}`;
+                                return (
+                                  <div key={b.id} className="flex items-center justify-between gap-1.5 whitespace-nowrap text-muted-foreground">
+                                    <span className={isOldest ? "text-amber-600 dark:text-amber-400 font-medium" : "text-emerald-600 dark:text-emerald-400 font-medium"}>
+                                      {isOldest ? "⏳" : "🟢"} {label} ({formatDateOnly(b.expiry_date)}):
+                                    </span>
+                                    <strong className="text-foreground font-semibold">{NUM(b.stock_quantity)} {p.unit}</strong>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-right">{PKR(Number(p.purchase_price) * Number(p.stock_quantity))}</TableCell>
+                      <TableCell className="text-right">{PKR(Number(p.selling_price) * Number(p.stock_quantity))}</TableCell>
+                      <TableCell>
+                        <Badge variant={stockStatus(p) === "out" ? "destructive" : stockStatus(p) === "low" ? "secondary" : "outline"}>
+                          {stockStatus(p) === "out" ? "Out of stock" : stockStatus(p) === "low" ? "Low" : "In stock"}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Button size="sm" variant="ghost" onClick={() => setHistoryProduct(p)}>
+                          <History className="mr-1 h-3.5 w-3.5 text-primary" /> History
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
           </CardContent></Card>
@@ -807,6 +854,7 @@ function InventoryPage() {
                   <Table className="text-xs">
                     <TableHeader>
                       <TableRow>
+                        <TableHead>Type</TableHead>
                         <TableHead>Batch #</TableHead>
                         <TableHead>Expiry Date</TableHead>
                         <TableHead className="text-right">Available Qty</TableHead>
@@ -814,27 +862,53 @@ function InventoryPage() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {batches
-                        .filter((b) => b.product_id === historyProduct.id && b.stock_quantity > 0)
-                        .map((b) => (
-                          <TableRow key={b.id}>
-                            <TableCell className="font-medium">{b.batch_number || "Standard"}</TableCell>
-                            <TableCell>
-                              <Badge variant={(daysToExpiry(b.expiry_date) ?? 99) < 90 ? "destructive" : "outline"}>
-                                {b.expiry_date || "No Expiry"}
-                              </Badge>
-                            </TableCell>
-                            <TableCell className="text-right font-bold">{NUM(b.stock_quantity)}</TableCell>
-                            <TableCell className="text-right">{PKR(b.purchase_price)}</TableCell>
-                          </TableRow>
-                        ))}
-                      {!batches.filter((b) => b.product_id === historyProduct.id && b.stock_quantity > 0).length && (
-                        <TableRow>
-                          <TableCell colSpan={4} className="py-2 text-center text-xs text-muted-foreground">
-                            No separate active batches recorded. Total stock: {NUM(historyProduct.stock_quantity)}
-                          </TableCell>
-                        </TableRow>
-                      )}
+                      {(() => {
+                        const prodBatches = batches
+                          .filter((b) => b.product_id === historyProduct.id && Number(b.stock_quantity) > 0)
+                          .sort((a, b) => {
+                            if (!a.expiry_date) return 1;
+                            if (!b.expiry_date) return -1;
+                            return new Date(a.expiry_date).getTime() - new Date(b.expiry_date).getTime();
+                          });
+                        if (!prodBatches.length) {
+                          return (
+                            <TableRow>
+                              <TableCell colSpan={5} className="py-2 text-center text-xs text-muted-foreground">
+                                No separate active batches recorded. Total stock: {NUM(historyProduct.stock_quantity)}
+                              </TableCell>
+                            </TableRow>
+                          );
+                        }
+                        return prodBatches.map((b, idx) => {
+                          const isOldest = idx === 0;
+                          const isNewest = idx === prodBatches.length - 1;
+                          const label = isOldest ? "Old Expiry" : isNewest ? "New Expiry" : `Batch ${idx + 1}`;
+                          return (
+                            <TableRow key={b.id}>
+                              <TableCell>
+                                <Badge
+                                  variant="outline"
+                                  className={`text-[10px] px-1.5 py-0 font-medium ${
+                                    isOldest
+                                      ? "border-amber-500 text-amber-700 bg-amber-50 dark:bg-amber-950/30 dark:text-amber-300"
+                                      : "border-emerald-500 text-emerald-700 bg-emerald-50 dark:bg-emerald-950/30 dark:text-emerald-300"
+                                  }`}
+                                >
+                                  {isOldest ? "⏳ " : "🟢 "}{label}
+                                </Badge>
+                              </TableCell>
+                              <TableCell className="font-medium">{b.batch_number || "Standard"}</TableCell>
+                              <TableCell>
+                                <Badge variant={(daysToExpiry(b.expiry_date) ?? 99) < 90 ? "destructive" : "outline"}>
+                                  {b.expiry_date ? formatDateOnly(b.expiry_date) : "No Expiry"}
+                                </Badge>
+                              </TableCell>
+                              <TableCell className="text-right font-bold text-foreground">{NUM(b.stock_quantity)}</TableCell>
+                              <TableCell className="text-right">{PKR(b.purchase_price)}</TableCell>
+                            </TableRow>
+                          );
+                        });
+                      })()}
                     </TableBody>
                   </Table>
                 </div>

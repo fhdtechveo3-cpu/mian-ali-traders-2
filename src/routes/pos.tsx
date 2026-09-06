@@ -311,6 +311,10 @@ function PosPage() {
                 const nearExpDate = getNearestBatchExpiry(p.id, p.expiry_date);
                 const daysLeft = daysToExpiry(nearExpDate);
 
+                const prodBatches = batches
+                  .filter((b) => b.product_id === p.id && Number(b.stock_quantity) > 0)
+                  .sort((a, b) => (a.expiry_date || "").localeCompare(b.expiry_date || ""));
+
                 return (
                   <button
                     key={p.id}
@@ -335,6 +339,12 @@ function PosPage() {
                         {NUM(p.stock_quantity)} {p.unit}
                       </Badge>
                     </div>
+                    {prodBatches.length > 1 && (
+                      <div className="flex items-center justify-between text-[10px] text-muted-foreground pt-1 border-t border-border/40">
+                        <span className="text-amber-600 dark:text-amber-400 font-medium">⏳ Old: {NUM(prodBatches[0].stock_quantity)}</span>
+                        <span className="text-emerald-600 dark:text-emerald-400 font-medium">🟢 New: {NUM(prodBatches[prodBatches.length - 1].stock_quantity)}</span>
+                      </div>
+                    )}
                   </button>
                 );
               })}
